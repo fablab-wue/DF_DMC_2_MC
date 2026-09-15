@@ -80,4 +80,10 @@ pc_dmc_test.py       Host DMC smoke test
 
 ---
 
+## License
+
+Copyright (c) 2026 Jochen Krapf \<jk@nerd2nerd.org\>
+
+Licensed under the [MIT License](LICENSE).
+
 Company names and product names mentioned in this project are trademarks or registered trademarks of their respective owners. Use here is for identification only.
