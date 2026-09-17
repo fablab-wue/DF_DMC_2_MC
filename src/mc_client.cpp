@@ -606,6 +606,19 @@ void McSerialClient::parseConfigLine(const String& line) {
     }
     return k.substring(strlen(prefix)).toInt() - 1;
   };
+  auto envFloat = [](const String& v) -> float {
+    String t = v;
+    t.trim();
+    if (t.length() == 0) {
+      return NAN;
+    }
+    String tl = t;
+    tl.toLowerCase();
+    if (tl == "none" || t == "-") {
+      return NAN;
+    }
+    return v.toFloat();
+  };
   if (key == "axis") {
     config_.axisCount = value.toInt();
   } else if (key == "motors") {
@@ -631,12 +644,12 @@ void McSerialClient::parseConfigLine(const String& line) {
     }
     a = axisIndex(key, "axis_min_");
     if (a >= 0 && a < kMaxAxes) {
-      config_.axisMin[a] = value.toFloat();
+      config_.axisMin[a] = envFloat(value);
       return;
     }
     a = axisIndex(key, "axis_max_");
     if (a >= 0 && a < kMaxAxes) {
-      config_.axisMax[a] = value.toFloat();
+      config_.axisMax[a] = envFloat(value);
       return;
     }
     a = axisIndex(key, "steps_per_unit_");
@@ -647,12 +660,12 @@ void McSerialClient::parseConfigLine(const String& line) {
     if (key.startsWith("MOTOR_") && key.endsWith("_min")) {
       const int n = key.substring(6, key.indexOf('_', 6)).toInt() - 1;
       if (n >= 0 && n < kMaxAxes) {
-        config_.axisMin[n] = value.toFloat();
+        config_.axisMin[n] = envFloat(value);
       }
     } else if (key.startsWith("MOTOR_") && key.endsWith("_max")) {
       const int n = key.substring(6, key.indexOf('_', 6)).toInt() - 1;
       if (n >= 0 && n < kMaxAxes) {
-        config_.axisMax[n] = value.toFloat();
+        config_.axisMax[n] = envFloat(value);
       }
     }
   }
