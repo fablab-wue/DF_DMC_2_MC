@@ -26,10 +26,11 @@ SliderMC
 
 - **Connect as dmc-lite** — hello name `SliderCtrl MC V1 (dmc-lite)`; Arc **steps per unit = 1000**
 - **Units** — 1000 DMC steps = 1 mm or 1 deg (same for speed/accel)
-- **Live GIO** — 4 out (GP2–5) / 4 in (GP6–9) on this Zero, not MC extenders
-- **DMX512** — 512 channels on GP0 (PIO UART + MAX485 for a real universe)
+- **Live GIO** — 4 out (GP1–4) / 4 in (GP5–8) on this Zero, not MC extenders
+- **DMX512** — 512 channels on GP0 (PIO UART + MAX485 for a real universe). Channels 1–6 also drive DMX1–DMX6 PWM at 18 kHz on GP29, GP28, GP27, GP26, GP15, GP14 (high-active, duty = level/255)
+- **MOVE** — GP11 high while the verbose status letter is `M`, `A`, `B`, `H`, or `P`
+- **Camera / bloop** — GP9 shutter + MC `CT`; GP10 buzzer + MC `BE`
 - **Path upload** — DF frames → SliderMC `PD` / `PG` (0-based inclusive; reverse if start > end)
-- **Camera / bloop** — GP14 shutter + MC `CT`; GP15 buzzer + MC `BE`
 - **Simulator** — `-DSIMULATE` (default): 1-axis stand-in if no MC answers
 
 ---
@@ -68,8 +69,8 @@ dmc-lite sketches ship **with Dragonframe**, not this repo: [where to find dmc-l
 ```text
 src/config.h         Pins, limits, 1000 steps = 1 mm/deg
 src/dmc_protocol     DMC framing / checksum
-src/gio              Local GIO, camera, buzzer
-src/dmx              Live DMX512 on GP0
+src/gio              Local GIO, camera, buzzer, MOVE
+src/dmx              Live DMX512 on GP0, plus DMX1–6 PWM
 src/path_store       DF upload → PD samples
 src/mc_client        SliderMC UART + simulator
 src/status_led       WS2812 / classic LED

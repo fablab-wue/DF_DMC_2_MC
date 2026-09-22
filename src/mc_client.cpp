@@ -31,6 +31,26 @@ String fmtMc(float v) {
   return String(buf);
 }
 
+static void writeMovePin(char letter) {
+  switch (letter) {
+    case 'M':
+    case 'A':
+    case 'B':
+    case 'H':
+    case 'P':
+      digitalWrite(kMovePin, HIGH);
+      break;
+    case 'I':
+    case 'E':
+    case 'D':
+    case 'L':
+      digitalWrite(kMovePin, LOW);
+      break;
+    default:
+      break;
+  }
+}
+
 String packMc(const float* v, int n) {
   String out;
   for (int i = 0; i < n; ++i) {
@@ -345,18 +365,18 @@ void McSerialClient::startSimulation() {
 void McSerialClient::simulateCgDump() {
   handleMcLine("# MC V1 - Slider Motion Controller - 1+0 axis ['?' for help]");
   handleMcLine("CG:axis=1");
-  handleMcLine("CG:motors=1");
-  handleMcLine("CG:servos=0");
-  handleMcLine("CG:max_speed_1=100");
-  handleMcLine("CG:max_accel_1=50");
+  handleMcLine("CG:motor_count=1");
+  handleMcLine("CG:servo_count=0");
+  handleMcLine("CG:motor_1_max_speed=100");
+  handleMcLine("CG:motor_1_max_accel=50");
   handleMcLine("CG:init_speed=40");
   handleMcLine("CG:init_accel=20");
-  handleMcLine("CG:unit_name=mm");
-  handleMcLine("CG:MOTOR_1_min=0");
-  handleMcLine("CG:MOTOR_1_max=1000");
+  handleMcLine("CG:axis_1_unit=mm");
+  handleMcLine("CG:motor_1_min=0");
+  handleMcLine("CG:motor_1_max=1000");
   handleMcLine("CG:axis_min_1=0");
   handleMcLine("CG:axis_max_1=1000");
-  handleMcLine("CG:steps_per_unit_1=80");
+  handleMcLine("CG:motor_1_steps_per_unit=80");
 }
 
 void McSerialClient::simulateCommand(const String& line) {
@@ -377,6 +397,7 @@ void McSerialClient::simulateCommand(const String& line) {
     parsePackedFloats(trimmed.substring(2), targetMm_, advertisedMotors());
     movingMask_ = 1;
     lastMotionMs_ = millis();
+    handleMcLine("#M " + fmtMc(positionMm_[0]) + " 0.00 0.00");
     return;
   }
   if (trimmed.startsWith("MS")) {
@@ -384,6 +405,7 @@ void McSerialClient::simulateCommand(const String& line) {
     pathActive_ = false;
     memcpy(targetMm_, positionMm_, sizeof(targetMm_));
     handleMcLine("!E:STOPPED");
+    handleMcLine("#I " + fmtMc(positionMm_[0]));
     return;
   }
   if (trimmed.startsWith("IP")) {
@@ -480,6 +502,7 @@ void McSerialClient::updateSimMotion() {
   }
   if (!any) {
     movingMask_ = 0;
+    handleMcLine("#I " + fmtMc(positionMm_[0]));
   }
 }
 
@@ -578,10 +601,11 @@ void McSerialClient::handleMcLine(const String& line) {
     } else if (letter == 'P' || letter == 'M' || letter == 'A' || letter == 'B') {
       movingMask_ = 1;
       pathActive_ = (letter == 'P');
-    } else if (letter == 'I') {
+    } else if (letter == 'I' || letter == 'D') {
       movingMask_ = 0;
       pathActive_ = false;
     }
+    writeMovePin(letter);
     const int sp = clean.indexOf(' ');
     if (sp > 0) {
       parsePackedFloats(clean.substring(sp + 1), positionMm_, 1);
@@ -619,25 +643,45 @@ void McSerialClient::parseConfigLine(const String& line) {
     }
     return v.toFloat();
   };
+  auto motorField = [](const String& k, const char* field) -> int {
+    if (!k.startsWith("motor_")) {
+      return -1;
+    }
+    const int us = k.indexOf('_', 6);
+    if (us < 0 || k.substring(us + 1) != field) {
+      return -1;
+    }
+    return k.substring(6, us).toInt() - 1;
+  };
   if (key == "axis") {
     config_.axisCount = value.toInt();
-  } else if (key == "motors") {
+  } else if (key == "motor_count" || key == "motors") {
     config_.motorCount = value.toInt();
-  } else if (key == "servos") {
+  } else if (key == "servo_count" || key == "servos") {
     config_.servoCount = value.toInt();
   } else if (key == "init_speed") {
     config_.initSpeed = value.toFloat();
   } else if (key == "init_accel") {
     config_.initAccel = value.toFloat();
-  } else if (key == "unit_name") {
-    strncpy(config_.unitName, value.c_str(), sizeof(config_.unitName) - 1);
+  } else if (key.startsWith("axis_") && key.endsWith("_unit")) {
+    const int a = key.substring(5, key.length() - 5).toInt() - 1;
+    if (a >= 0 && a < kMaxAxes && value.length() > 0) {
+      strncpy(config_.unitName[a], value.c_str(), sizeof(config_.unitName[a]) - 1);
+      config_.unitName[a][sizeof(config_.unitName[a]) - 1] = 0;
+    }
   } else {
-    int a = axisIndex(key, "max_speed_");
+    int a = motorField(key, "max_speed");
+    if (a < 0) {
+      a = axisIndex(key, "max_speed_");
+    }
     if (a >= 0 && a < kMaxAxes) {
       config_.maxSpeed[a] = value.toFloat();
       return;
     }
-    a = axisIndex(key, "max_accel_");
+    a = motorField(key, "max_accel");
+    if (a < 0) {
+      a = axisIndex(key, "max_accel_");
+    }
     if (a >= 0 && a < kMaxAxes) {
       config_.maxAccel[a] = value.toFloat();
       return;
@@ -652,9 +696,22 @@ void McSerialClient::parseConfigLine(const String& line) {
       config_.axisMax[a] = envFloat(value);
       return;
     }
-    a = axisIndex(key, "steps_per_unit_");
+    a = motorField(key, "steps_per_unit");
+    if (a < 0) {
+      a = axisIndex(key, "steps_per_unit_");
+    }
     if (a >= 0 && a < kMaxAxes) {
       config_.stepsPerUnit[a] = value.toFloat();
+      return;
+    }
+    a = motorField(key, "min");
+    if (a >= 0 && a < kMaxAxes) {
+      config_.axisMin[a] = envFloat(value);
+      return;
+    }
+    a = motorField(key, "max");
+    if (a >= 0 && a < kMaxAxes) {
+      config_.axisMax[a] = envFloat(value);
       return;
     }
     if (key.startsWith("MOTOR_") && key.endsWith("_min")) {

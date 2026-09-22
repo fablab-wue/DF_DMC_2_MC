@@ -21,6 +21,8 @@ void DmcGio::begin() {
   ocWrite(kCameraShutterPin, false);
   pinMode(kBuzzerPin, OUTPUT);
   digitalWrite(kBuzzerPin, LOW);
+  pinMode(kMovePin, OUTPUT);
+  digitalWrite(kMovePin, LOW);
   outBits_ = 0;
   inBits_ = readInputs();
   inStable_ = inBits_;

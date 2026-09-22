@@ -1,7 +1,8 @@
 #pragma once
 
-// Live DMX512 on GP0. Hardware Serial2 cannot use GP0 (UART1 pins are 4/8/20/24),
-// so this is a PIO UART at 250000 8N2 plus BREAK/MAB. Needs MAX485 for a real universe.
+// Live DMX512 on GP0 (PIO UART, 250000 8N2 plus BREAK/MAB) and, in parallel,
+// high-active PWM on DMX1..DMX6 for channels 1–6 of the same buffer.
+// Hardware Serial2 cannot use GP0 (UART1 pins are 4/8/20/24). Needs MAX485 for a real universe.
 
 #include "config.h"
 
@@ -19,6 +20,8 @@ class DmxEngine {
 
  private:
   void sendNow();
+  void beginPwm();
+  void writePwm();
 
   SerialPIO uart_{kDmxTxPin, NOPIN};
   uint8_t current_[kDmxChannels]{};

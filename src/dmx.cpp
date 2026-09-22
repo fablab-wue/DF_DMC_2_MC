@@ -1,5 +1,9 @@
 #include "dmx.h"
 
+#include <hardware/clocks.h>
+#include <hardware/gpio.h>
+#include <hardware/pwm.h>
+
 #include <cstring>
 
 namespace sliderdmc {
@@ -12,6 +16,8 @@ void DmxEngine::begin() {
   lastSendMs_ = 0;
   uart_.begin(250000, SERIAL_8N2);
   txReady_ = static_cast<bool>(uart_);
+  beginPwm();
+  writePwm();
 }
 
 void DmxEngine::apply(uint16_t startChannel, const uint8_t* levels, uint16_t count, bool ramp) {
@@ -62,7 +68,32 @@ void DmxEngine::update() {
   }
 }
 
+void DmxEngine::beginPwm() {
+  const float div =
+      static_cast<float>(clock_get_hz(clk_sys)) / (static_cast<float>(kDmxPwmHz) * 255.0f);
+  pwm_config cfg = pwm_get_default_config();
+  pwm_config_set_clkdiv(&cfg, div);
+  pwm_config_set_wrap(&cfg, 254);
+  bool sliceInited[8] = {};
+  for (uint8_t pin : kDmxPwmPins) {
+    gpio_set_function(pin, GPIO_FUNC_PWM);
+    const unsigned slice = pwm_gpio_to_slice_num(pin);
+    if (slice < 8 && !sliceInited[slice]) {
+      pwm_init(slice, &cfg, true);
+      sliceInited[slice] = true;
+    }
+    pwm_set_gpio_level(pin, 0);
+  }
+}
+
+void DmxEngine::writePwm() {
+  for (int i = 0; i < 6; ++i) {
+    pwm_set_gpio_level(kDmxPwmPins[i], current_[i]);
+  }
+}
+
 void DmxEngine::sendNow() {
+  writePwm();
   if (!txReady_) {
     return;
   }

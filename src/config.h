@@ -44,11 +44,14 @@ constexpr uint32_t kStatusLedHeartbeatMs = 500;
 constexpr uint32_t kStatusLedFastBlinkMs = 100;
 constexpr uint32_t kPositionReportMs = 100;
 
-constexpr uint8_t kGioOutPins[4] = {2, 3, 4, 5};  // DMC GIO OUT bits 0–3 (OC + pull-up)
-constexpr uint8_t kGioInPins[4] = {6, 7, 8, 9};   // DMC GIO IN bits 0–3 (pull-up)
-constexpr uint8_t kCameraShutterPin = 14;         // shutter OC + pull-up (with MC CT)
-constexpr uint8_t kBuzzerPin = 15;                // preroll/bloop (with MC BE)
+constexpr uint8_t kGioOutPins[4] = {1, 2, 3, 4};  // DMC GIO OUT bits 0–3 (OC + pull-up)
+constexpr uint8_t kGioInPins[4] = {5, 6, 7, 8};   // DMC GIO IN bits 0–3 (pull-up)
+constexpr uint8_t kCameraShutterPin = 9;          // shutter OC + pull-up (with MC CT)
+constexpr uint8_t kBuzzerPin = 10;                // preroll/bloop (with MC BE)
+constexpr uint8_t kMovePin = 11;                  // MOVE: high while verbose status is moving
 constexpr uint8_t kDmxTxPin = 0;                  // DMX512 TX (PIO UART; GP0 is UART0, same as MC Serial1)
+constexpr uint8_t kDmxPwmPins[6] = {29, 28, 27, 26, 15, 14};  // DMX1..DMX6, channels 1–6
+constexpr uint32_t kDmxPwmHz = 18000;
 
 constexpr uint8_t kHelloVersionMajor = 1;
 constexpr uint8_t kHelloVersionMinor = 2;

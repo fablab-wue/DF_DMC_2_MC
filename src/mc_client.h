@@ -21,7 +21,7 @@ struct McConfig {
   float axisMin[kMaxAxes] = {0, 0, 0, 0, 0, 0};
   float axisMax[kMaxAxes] = {1000, 1000, 1000, 1000, 1000, 1000};
   float stepsPerUnit[kMaxAxes] = {80, 80, 80, 80, 80, 80};
-  char unitName[16] = "mm";
+  char unitName[kMaxAxes][16] = {"mm", "mm", "mm", "mm", "mm", "mm"};
 };
 
 class McSerialClient {
