@@ -1,10 +1,10 @@
-# SliderDMC
+# DF_DMC_2_MC
 
 **Dragonframe DMC v2 USB bridge for DIY motorized camera sliders** — C++ / PlatformIO on a **Waveshare RP2040-Zero**, talking [SliderMC](https://github.com/fablab-wue/SliderMC) ASCII over UART.
 
 ## About
 
-**SliderDMC** lets [Dragonframe](https://www.dragonframe.com/) Arc drive the same motion board as the physical panel ([SliderCtrl](https://github.com/fablab-wue/SliderCtrl)). The PC speaks binary **DMC v2** on USB CDC; this Zero translates millimetre moves, path play, GIO, camera, and live DMX onto SliderMC’s UART contract (`VH`, `CG`, `MT`, `PG`, …).
+**DF_DMC_2_MC** lets [Dragonframe](https://www.dragonframe.com/) Arc drive the same motion board as the physical panel ([SliderCtrl](https://github.com/fablab-wue/SliderCtrl)). The PC speaks binary **DMC v2** on USB CDC; this Zero translates millimetre moves, path play, GIO, camera, and live DMX onto SliderMC’s UART contract (`VH`, `CG`, `MT`, `PG`, …).
 
 Use it **instead of** a UIC on that UART, not in parallel. Rail, motor, and housing stay yours.
 
@@ -15,7 +15,7 @@ Docs and manuals: **[SliderDoc](https://github.com/fablab-wue/SliderDoc)**.
 ```text
 Dragonframe (PC)
         USB CDC  — binary DMC v2  (device type dmc-lite)
-SliderDMC  (RP2040-Zero)
+DF_DMC_2_MC  (RP2040-Zero)
         UART 115200  GP12 TX / GP13 RX
 SliderMC
 ```
@@ -38,7 +38,7 @@ SliderMC
 ## Quick start (VS Code)
 
 1. Install [VS Code](https://code.visualstudio.com/) and the **PlatformIO IDE** extension.
-2. **File → Open Folder** → this repository (`SliderDMC`).
+2. **File → Open Folder** → this repository (`DF_DMC_2_MC`).
 3. PlatformIO: **Build** / **Upload**.
 4. Dragonframe: Scene → Connections → device type **dmc-lite** → this COM port → Connect.
 5. In Arc, set **steps per unit = 1000**.
