@@ -231,19 +231,38 @@ void DmcBridge::handleDmcFrame(const DmcFrame& frame) {
       break;
     }
     case kDmcMsgDmx: {
-      uint32_t channel = 1;
-      uint16_t count = 0;
       uint8_t ramp = 0;
-      if (frame.payload.size() < 7 || !readDwordLE(frame.payload, 0, &channel) ||
-          !readWordLE(frame.payload, 4, &count) || !readByte(frame.payload, 6, &ramp)) {
-        sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
-        break;
+      uint16_t channel = 1;
+      uint16_t count = 0;
+      const uint8_t* levels = nullptr;
+      bool parsed = false;
+      if (frame.payload.size() >= 7) {
+        uint32_t channel32 = 0;
+        uint16_t counted = 0;
+        uint8_t rampByte = 0;
+        if (readDwordLE(frame.payload, 0, &channel32) && readWordLE(frame.payload, 4, &counted) &&
+            readByte(frame.payload, 6, &rampByte) && counted > 0 && 7u + counted == frame.payload.size() &&
+            channel32 >= 1 && channel32 <= static_cast<uint32_t>(kDmxChannels)) {
+          channel = static_cast<uint16_t>(channel32);
+          count = counted;
+          ramp = rampByte;
+          levels = frame.payload.data() + 7;
+          parsed = true;
+        }
       }
-      if (count == 0 || 7 + count > frame.payload.size()) {
+      if (!parsed) {
+        if (frame.payload.size() < 4 || !readByte(frame.payload, 0, &ramp) || !readWordLE(frame.payload, 1, &channel)) {
+          sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+          break;
+        }
+        count = static_cast<uint16_t>(frame.payload.size() - 3);
+        levels = frame.payload.data() + 3;
+      }
+      if (channel < 1 || channel > kDmxChannels || count == 0) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
         break;
       }
-      dmx_.apply(static_cast<uint16_t>(channel), frame.payload.data() + 7, count, ramp != 0);
+      dmx_.apply(channel, levels, count, ramp != 0);
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
     }

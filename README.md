@@ -8,9 +8,9 @@
 
 Use it **instead of** a UIC on that UART, not in parallel. Rail, motor, and housing stay yours.
 
-Docs and manuals: **[SliderDoc](https://github.com/fablab-wue/SliderDoc)**.
+**Documentation:** [docs/README.md](docs/README.md)
 
-> Documentation: [SliderDoc](https://github.com/fablab-wue/SliderDoc)
+Slider context (rail, panel, MC UART): [SliderDoc](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/README.md).
 
 ```text
 Dragonframe (PC)
@@ -45,24 +45,22 @@ SliderMC
 
 Shared DMC framing, the path upload table, DMX, and GIO come from the sibling checkout [DF_DMC_Common](https://github.com/fablab-wue/DF_DMC_Common) (`../DF_DMC_Common`). Clone it next to this repo before building.
 
-USB CDC is binary DMC — do not use the PlatformIO serial monitor as a console. Details: [dmc/build.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/build.md).
+USB CDC is binary DMC — do not use the PlatformIO serial monitor as a console. Details: [docs/build.md](docs/build.md).
 
-PC smoke test (Dragonframe disconnected): `python pc_dmc_test.py COM21 --sequence hi` — see [dmc/build.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/build.md).
+PC smoke test (Dragonframe disconnected): `python pc_dmc_test.py COM21 --sequence hi` — see [docs/build.md](docs/build.md).
 
 ---
 
-## Documentation (SliderDoc)
+## Documentation
 
 | Topic | Document |
 |-------|----------|
-| Overview / Connect / units | [dmc/overview.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/overview.md) |
-| Build / flash / PC test | [dmc/build.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/build.md) |
-| GPIO / UART / wiring ASCII | [dmc/pins.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/pins.md) |
-| DMC opcode → MC map | [dmc/mapping.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/mapping.md) |
+| Overview / Connect / units | [docs/overview.md](docs/overview.md) |
+| Build / flash / PC test | [docs/build.md](docs/build.md) |
+| GPIO / UART / wiring | [docs/pins.md](docs/pins.md) |
+| DMC opcode → MC map | [docs/mapping.md](docs/mapping.md) |
 | SliderMC UART | [contract/protocol.md](https://github.com/fablab-wue/SliderDoc/blob/main/contract/protocol.md) |
 | Official DMC v2 (Dragonframe) | [DMC-Protocol-2024-08-13.pdf](https://www.dragonframe.com/download/dmcproto/DMC-Protocol-2024-08-13.pdf) |
-
-dmc-lite sketches ship **with Dragonframe**, not this repo: [where to find dmc-lite](https://www.dragonframe.com/ufaqs/where-do-i-find-the-dmc-lite-arduino-sketch/).
 
 ---
 
