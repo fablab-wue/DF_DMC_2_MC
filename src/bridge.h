@@ -3,14 +3,17 @@
 // USB DMC dispatch: hello, motors, GIO, DMX, path play sequencing.
 
 #include "config.h"
-#include "dmc_protocol.h"
-#include "dmx.h"
-#include "gio.h"
 #include "mc_client.h"
 #include "path_store.h"
 #include "status_led.h"
 
+#include <dmc_protocol.h>
+#include <dmx_engine.h>
+#include <gio_io.h>
+
 namespace sliderdmc {
+
+using namespace dfdmc;
 
 class DmcBridge {
  public:

@@ -8,8 +8,9 @@ namespace sliderdmc {
 void DmcBridge::setup() {
   Serial.begin(115200);
   Serial.setTimeout(0);
-  gio_.begin();
-  dmx_.begin();
+  const GioMap gioMap{kGioOutPins, 4, kGioInPins, 4, kCameraShutterPin, kBuzzerPin, kMovePin};
+  gio_.begin(gioMap);
+  dmx_.begin(kDmxTxPin, kDmxPwmPins, 6, kDmxPwmHz, false);
   dfConnected_ = false;
   bootHelloSent_ = false;
   mcClient_.attachPath(&path_);

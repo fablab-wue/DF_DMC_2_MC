@@ -3,8 +3,9 @@
 // SliderMC ASCII UART on GP12/13: VH, CG, IP, MT, PD/PS/PG, simulator fallback.
 
 #include "config.h"
-#include "dmc_protocol.h"
 #include "path_store.h"
+
+#include <dmc_protocol.h>
 
 #include <Arduino.h>
 

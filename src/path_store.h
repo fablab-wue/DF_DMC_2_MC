@@ -1,12 +1,13 @@
 #pragma once
 
-// DragonFrame upload table → SliderMC PD samples (µm int16, split if needed).
-// PG ranges are 0-based inclusive; start>end means reverse.
+// Dragonframe upload table → SliderMC PD samples (µm int16, split if needed).
+// Positions live in dfdmc::PathTable. PG ranges are 0-based inclusive; start>end means reverse.
 
 #include "config.h"
 
+#include <path_table.h>
+
 #include <cstdint>
-#include <cstring>
 
 namespace sliderdmc {
 
@@ -18,12 +19,12 @@ class PathStore {
   bool buildPd();
 
   bool empty() const { return !built_ || sampleCount_ <= 0; }
-  int frameCount() const { return frameCount_; }
+  int frameCount() const { return table_.frameCount(); }
   int sampleCount() const { return sampleCount_; }
-  int startFrame() const { return startFrame_; }
-  int endFrame() const { return endFrame_; }
-  int axisCount() const { return axisCount_; }
-  uint32_t triggerMask() const { return triggerMask_; }
+  int startFrame() const { return table_.startFrame(); }
+  int endFrame() const { return table_.endFrame(); }
+  int axisCount() const { return table_.axisCount(); }
+  uint32_t triggerMask() const { return table_.triggerMask(); }
 
   int32_t positionSteps(int axis0, int localFrame) const;
   bool localFrame(int dfFrame, int* out) const;
@@ -32,16 +33,10 @@ class PathStore {
   uint8_t triggerAtLocal(int localFrame) const;
 
  private:
-  int32_t pos_[kMaxAxes][kMaxUploadFrames]{};
+  dfdmc::PathTable table_;
   int16_t pd_[kMaxAxes][kMaxPathSamples]{};
   uint16_t frameToSample_[kMaxUploadFrames]{};
-  uint8_t triggers_[kMaxUploadFrames]{};
-  int frameCount_ = 0;
   int sampleCount_ = 0;
-  int startFrame_ = 1;
-  int endFrame_ = 1;
-  int axisCount_ = 1;
-  uint32_t triggerMask_ = 0;
   bool built_ = false;
 };
 

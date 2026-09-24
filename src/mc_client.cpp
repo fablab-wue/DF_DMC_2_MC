@@ -83,7 +83,7 @@ void McSerialClient::begin() {
   for (int i = 0; i < kMaxAxes; ++i) {
     positionMm_[i] = 0;
     targetMm_[i] = 0;
-    motorConfig_[i] = kDmcMotorConfigEnabled;
+    motorConfig_[i] = dfdmc::kDmcMotorConfigEnabled;
   }
   requestConfig();
 }

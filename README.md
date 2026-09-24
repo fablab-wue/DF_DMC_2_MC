@@ -43,6 +43,8 @@ SliderMC
 4. Dragonframe: Scene → Connections → device type **dmc-lite** → this COM port → Connect.
 5. In Arc, set **steps per unit = 1000**.
 
+Shared DMC framing, the path upload table, DMX, and GIO come from the sibling checkout [DF_DMC_Common](https://github.com/fablab-wue/DF_DMC_Common) (`../DF_DMC_Common`). Clone it next to this repo before building.
+
 USB CDC is binary DMC — do not use the PlatformIO serial monitor as a console. Details: [dmc/build.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/build.md).
 
 PC smoke test (Dragonframe disconnected): `python pc_dmc_test.py COM21 --sequence hi` — see [dmc/build.md](https://github.com/fablab-wue/SliderDoc/blob/main/dmc/build.md).
@@ -68,10 +70,7 @@ dmc-lite sketches ship **with Dragonframe**, not this repo: [where to find dmc-l
 
 ```text
 src/config.h         Pins, limits, 1000 steps = 1 mm/deg
-src/dmc_protocol     DMC framing / checksum
-src/gio              Local GIO, camera, buzzer, MOVE
-src/dmx              Live DMX512 on GP0, plus DMX1–6 PWM
-src/path_store       DF upload → PD samples
+src/path_store       DF upload → PD samples (positions in DF_DMC_Common)
 src/mc_client        SliderMC UART + simulator
 src/status_led       WS2812 / classic LED
 src/bridge           USB DMC dispatch
