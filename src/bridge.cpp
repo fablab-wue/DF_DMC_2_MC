@@ -1,5 +1,6 @@
 #include "bridge.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -35,6 +36,7 @@ void DmcBridge::loop() {
   maybeSendPositionReport();
   maybeUnsolicitedGio();
   maybeFinishPath();
+  maybeFinishShoot();
   pumpPendingPlay();
   if (mcClient_.hardStopLatched()) {
     sendDmcAck(0, kDmcMsgMotorHardStop, kDmcAckOk);
@@ -85,7 +87,7 @@ void DmcBridge::sendDmcHello(uint32_t id) {
   appendByte(payload, 4);
   appendByte(payload, 0);
   appendDwordLE(payload, static_cast<uint32_t>(kMaxUploadFrames));
-  appendDwordLE(payload, kDmcCapRealTime | kDmcCapRealTimeCamera);
+  appendDwordLE(payload, kDmcCapRealTime | kDmcCapGoMotion | kDmcCapGoMotion2 | kDmcCapRealTimeCamera);
   appendWordLE(payload, kHelloProtocolVersion);
   sendDmcFrame(id, kDmcMsgHi, payload);
 }
@@ -143,10 +145,276 @@ void DmcBridge::maybeUnsolicitedGio() {
 
 void DmcBridge::maybeFinishPath() {
   const bool active = mcClient_.pathActive();
-  if (wasPathActive_ && !active && dfConnected_) {
+  if (wasPathActive_ && !active && dfConnected_ && !shootGoing_ && !shootPendingMf_) {
     sendDmcFrame(0, kDmcMsgRtEnd, {});
   }
   wasPathActive_ = active;
+}
+
+void DmcBridge::maybeFinishShoot() {
+  if (!shootGoing_ && !shootPendingMf_) {
+    return;
+  }
+  if (mcClient_.takeCommandError()) {
+    if (shootShutterOn_) {
+      gio_.setCameraShutter(false);
+      shootShutterOn_ = false;
+    }
+    shootGoing_ = false;
+    shootPendingMf_ = false;
+    shootArmed_ = false;
+    return;
+  }
+  const uint32_t elapsed = millis() - shootT0_;
+  if (shootPendingMf_ && elapsed >= shootDelayMs_) {
+    if (!mcClient_.moveForMs(shootMoveMs_, shootRampMs_, shootEndSteps_, shootBlur_, mcClient_.advertisedMotors())) {
+      shootPendingMf_ = false;
+      shootGoing_ = false;
+      return;
+    }
+    shootPendingMf_ = false;
+    shootGoing_ = true;
+  }
+  if (!shootGoing_) {
+    return;
+  }
+  if (!shootShutterOn_ && elapsed >= shootShutterOpenMs_) {
+    gio_.setCameraShutter(true);
+    shootShutterOn_ = true;
+  }
+  if (shootShutterOn_ && elapsed >= shootShutterCloseMs_) {
+    gio_.setCameraShutter(false);
+    shootShutterOn_ = false;
+  }
+  if (elapsed >= shootDoneMs_ && !mcClient_.moving()) {
+    shootGoing_ = false;
+  }
+}
+
+static int32_t sampleSteps(const PathStore& path, int axis, double frameTime) {
+  const int lo = path.startFrame() < path.endFrame() ? path.startFrame() : path.endFrame();
+  const int hi = path.startFrame() > path.endFrame() ? path.startFrame() : path.endFrame();
+  if (frameTime < lo) {
+    frameTime = lo;
+  }
+  if (frameTime > hi) {
+    frameTime = hi;
+  }
+  const int f0 = static_cast<int>(floor(frameTime));
+  int f1 = f0 + 1;
+  if (f1 > hi) {
+    f1 = hi;
+  }
+  int local0 = 0;
+  if (!path.localFrame(f0, &local0)) {
+    return 0;
+  }
+  const int32_t p0 = path.positionSteps(axis, local0);
+  if (f1 == f0) {
+    return p0;
+  }
+  int local1 = 0;
+  if (!path.localFrame(f1, &local1)) {
+    return p0;
+  }
+  const double u = frameTime - static_cast<double>(f0);
+  return p0 + static_cast<int32_t>(lround((path.positionSteps(axis, local1) - p0) * u));
+}
+
+void DmcBridge::handleShootFrame(const DmcFrame& frame) {
+  int32_t dfFrame = 0;
+  uint8_t direction = 1;
+  uint32_t exposureMs = 0;
+  uint16_t blurX10 = 0;
+  if (frame.payload.size() < 11 || !readSignedDwordLE(frame.payload, 0, &dfFrame) ||
+      !readByte(frame.payload, 4, &direction) || !readDwordLE(frame.payload, 5, &exposureMs) ||
+      !readWordLE(frame.payload, 9, &blurX10)) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+    return;
+  }
+  if (mcClient_.moving() || shootGoing_ || shootPendingMf_) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+    return;
+  }
+  if (blurX10 == 0) {
+    blurX10 = 1000;
+  }
+
+  const int n = mcClient_.advertisedMotors();
+  bool overrideAxis[kMaxAxes] = {};
+  int32_t posA[kMaxAxes] = {};
+  int32_t posB[kMaxAxes] = {};
+  size_t off = 11;
+  while (off + 9 <= frame.payload.size()) {
+    uint8_t motor = 0;
+    int32_t a = 0;
+    int32_t b = 0;
+    if (!readByte(frame.payload, off, &motor) || !readSignedDwordLE(frame.payload, off + 1, &a) ||
+        !readSignedDwordLE(frame.payload, off + 5, &b)) {
+      break;
+    }
+    if (motorIndexValid(motor)) {
+      overrideAxis[motor - 1] = true;
+      posA[motor - 1] = a;
+      posB[motor - 1] = b;
+    }
+    off += 9;
+  }
+
+  const int dirSign = direction ? 1 : -1;
+  const double dt = static_cast<double>(blurX10) * 0.0005;
+  const double te = static_cast<double>(exposureMs) / 1000.0;
+  int32_t startSteps[kMaxAxes] = {};
+  for (int axis = 0; axis < n; ++axis) {
+    int local = 0;
+    int32_t framePose = mcClient_.positionSteps(axis);
+    if (path_.localFrame(dfFrame, &local)) {
+      framePose = path_.positionSteps(axis, local);
+    }
+    int32_t openPose = framePose;
+    int32_t closePose = framePose;
+    if (mcClient_.blurEnabled(axis) && overrideAxis[axis]) {
+      const double delta = (0.5 - fabs(dt)) * static_cast<double>(posB[axis] - posA[axis]);
+      openPose = posA[axis] + static_cast<int32_t>(lround(delta));
+      closePose = posB[axis] - static_cast<int32_t>(lround(delta));
+    } else if (mcClient_.blurEnabled(axis) && !path_.empty()) {
+      openPose = sampleSteps(path_, axis, static_cast<double>(dfFrame) - dirSign * dt);
+      closePose = sampleSteps(path_, axis, static_cast<double>(dfFrame) + dirSign * dt);
+    }
+    const int32_t span = closePose - openPose;
+    const int sign = span >= 0 ? 1 : -1;
+    const double v = te > 0.0 ? fabs(static_cast<double>(span)) / te : 0.0;
+    const int32_t accel = static_cast<int32_t>(lround(0.5 * v));
+    shootBlur_[axis] = span != 0;
+    startSteps[axis] = shootBlur_[axis] ? openPose - sign * accel : framePose;
+    shootEndSteps_[axis] = shootBlur_[axis] ? closePose + sign * accel : framePose;
+  }
+  for (int axis = n; axis < kMaxAxes; ++axis) {
+    shootBlur_[axis] = false;
+  }
+
+  shootMoveMs_ = exposureMs + 2000;
+  shootRampMs_ = 1000;
+  shootDelayMs_ = 0;
+  shootShutterOpenMs_ = 1000;
+  shootShutterCloseMs_ = 1000 + exposureMs;
+  shootDoneMs_ = 2000 + exposureMs;
+  shootGoing_ = false;
+  shootShutterOn_ = false;
+  shootArmed_ = true;
+  mcClient_.moveToSteps(startSteps, n);
+  sendDmcAck(frame.id, frame.type, kDmcAckOk);
+}
+
+void DmcBridge::handleShootFrame2(const DmcFrame& frame) {
+  int32_t dfFrame = 0;
+  uint32_t exposureMs = 0;
+  uint16_t openWord = 0;
+  uint16_t closeWord = 0;
+  if (frame.payload.size() < 12 || !readSignedDwordLE(frame.payload, 0, &dfFrame) ||
+      !readDwordLE(frame.payload, 4, &exposureMs) || !readWordLE(frame.payload, 8, &openWord) ||
+      !readWordLE(frame.payload, 10, &closeWord)) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+    return;
+  }
+  if (mcClient_.moving() || shootGoing_ || shootPendingMf_) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrMoving);
+    return;
+  }
+  if (exposureMs == 0) {
+    exposureMs = 1000;
+  }
+  if (exposureMs > 60000) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+    return;
+  }
+  const int16_t shutterOpen = static_cast<int16_t>(openWord);
+  const int16_t shutterClose = static_cast<int16_t>(closeWord);
+  if (shutterClose <= shutterOpen) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+    return;
+  }
+
+  const int n = mcClient_.advertisedMotors();
+  bool overrideAxis[kMaxAxes] = {};
+  int32_t posA[kMaxAxes] = {};
+  int32_t posB[kMaxAxes] = {};
+  size_t off = 12;
+  while (off + 9 <= frame.payload.size()) {
+    uint8_t motor = 0;
+    int32_t a = 0;
+    int32_t b = 0;
+    if (!readByte(frame.payload, off, &motor) || !readSignedDwordLE(frame.payload, off + 1, &a) ||
+        !readSignedDwordLE(frame.payload, off + 5, &b)) {
+      break;
+    }
+    if (motorIndexValid(motor)) {
+      overrideAxis[motor - 1] = true;
+      posA[motor - 1] = a;
+      posB[motor - 1] = b;
+    }
+    off += 9;
+  }
+
+  const double te = static_cast<double>(exposureMs) / 1000.0;
+  const double degrees = static_cast<double>(shutterClose - shutterOpen);
+  const double secondsPerDegree = te / degrees;
+  const double moveT = 360.0 * secondsPerDegree;
+  const uint32_t moveMs = static_cast<uint32_t>(lround(moveT * 1000.0));
+  const uint32_t rampMs = static_cast<uint32_t>(lround(moveT * 0.125 * 1000.0));
+  if (moveMs < 1 || moveMs > 60000 || rampMs < 1 || rampMs * 2 >= moveMs) {
+    sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+    return;
+  }
+  uint32_t delayMs = 0;
+  uint32_t shutterOpenMs = 0;
+  if (shutterOpen < 0) {
+    delayMs = static_cast<uint32_t>(lround(-shutterOpen * secondsPerDegree * 1000.0));
+    shutterOpenMs = 0;
+  } else {
+    shutterOpenMs = static_cast<uint32_t>(lround(shutterOpen * secondsPerDegree * 1000.0));
+  }
+  const uint32_t shutterCloseMs = shutterOpenMs + exposureMs;
+  uint32_t postMs = 0;
+  if (shutterClose > 360) {
+    postMs = static_cast<uint32_t>(lround((shutterClose - 360) * secondsPerDegree * 1000.0));
+  }
+
+  int32_t startSteps[kMaxAxes] = {};
+  for (int axis = 0; axis < n; ++axis) {
+    int local = 0;
+    int32_t framePose = mcClient_.positionSteps(axis);
+    if (path_.localFrame(dfFrame, &local)) {
+      framePose = path_.positionSteps(axis, local);
+    }
+    int32_t startPose = framePose;
+    int32_t endPose = framePose;
+    if (mcClient_.blurEnabled(axis) && overrideAxis[axis]) {
+      startPose = posA[axis];
+      endPose = posB[axis];
+    } else if (mcClient_.blurEnabled(axis) && !path_.empty()) {
+      startPose = sampleSteps(path_, axis, static_cast<double>(dfFrame) - 0.5);
+      endPose = sampleSteps(path_, axis, static_cast<double>(dfFrame) + 0.5);
+    }
+    shootBlur_[axis] = startPose != endPose;
+    startSteps[axis] = shootBlur_[axis] ? startPose : framePose;
+    shootEndSteps_[axis] = shootBlur_[axis] ? endPose : framePose;
+  }
+  for (int axis = n; axis < kMaxAxes; ++axis) {
+    shootBlur_[axis] = false;
+  }
+
+  shootMoveMs_ = moveMs;
+  shootRampMs_ = rampMs;
+  shootDelayMs_ = delayMs;
+  shootShutterOpenMs_ = shutterOpenMs;
+  shootShutterCloseMs_ = shutterCloseMs;
+  shootDoneMs_ = delayMs + moveMs + postMs;
+  shootGoing_ = false;
+  shootShutterOn_ = false;
+  shootArmed_ = true;
+  mcClient_.moveToSteps(startSteps, n);
+  sendDmcAck(frame.id, frame.type, kDmcAckOk);
 }
 
 void DmcBridge::fireBloop(unsigned ms) {
@@ -561,7 +829,36 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
     }
+    case kDmcMsgRtShootFrame:
+      handleShootFrame(frame);
+      break;
+    case kDmcMsgRtShootFrame2:
+      handleShootFrame2(frame);
+      break;
     case kDmcMsgRtGo:
+      if (shootArmed_) {
+        if (mcClient_.moving() || shootGoing_ || shootPendingMf_) {
+          sendDmcAck(frame.id, frame.type, kDmcAckErrNotInPosition);
+          break;
+        }
+        shootT0_ = millis();
+        shootArmed_ = false;
+        shootShutterOn_ = false;
+        if (shootDelayMs_ == 0) {
+          if (!mcClient_.moveForMs(shootMoveMs_, shootRampMs_, shootEndSteps_, shootBlur_,
+                                   mcClient_.advertisedMotors())) {
+            sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+            break;
+          }
+          shootGoing_ = true;
+          shootPendingMf_ = false;
+        } else {
+          shootPendingMf_ = true;
+          shootGoing_ = false;
+        }
+        sendDmcAck(frame.id, frame.type, kDmcAckOk);
+        break;
+      }
       if (path_.empty()) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
         break;

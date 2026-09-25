@@ -133,6 +133,110 @@ void McSerialClient::moveAxisToSteps(int axis0, int32_t steps) {
   sendCommand("MT", packMc(targetMm_, advertisedMotors()));
 }
 
+void McSerialClient::moveToSteps(const int32_t* steps, int n) {
+  if (n > advertisedMotors()) {
+    n = advertisedMotors();
+  }
+  bool any = false;
+  for (int a = 0; a < n; ++a) {
+    targetMm_[a] = dmcStepsToMc(steps[a]);
+    if (fabsf(targetMm_[a] - positionMm_[a]) > 0.0005f) {
+      movingMask_ |= (1U << a);
+      any = true;
+    }
+  }
+  if (!any) {
+    return;
+  }
+  lastMotionMs_ = millis();
+  sendCommand("MT", packMc(targetMm_, advertisedMotors()));
+}
+
+bool McSerialClient::blurEnabled(int axis0) const {
+  return axis0 >= 0 && axis0 < kMaxAxes && (motorConfig_[axis0] & dfdmc::kDmcMotorConfigBlur) != 0;
+}
+
+bool McSerialClient::takeCommandError() {
+  const bool err = commandError_;
+  commandError_ = false;
+  return err;
+}
+
+bool McSerialClient::moveDurationMs(uint32_t ms, const int32_t* steps, const bool* moveAxis, int n) {
+  if (ms < 1 || ms > 60000 || steps == nullptr || moveAxis == nullptr) {
+    return false;
+  }
+  if (n > advertisedMotors()) {
+    n = advertisedMotors();
+  }
+  commandError_ = false;
+  const float seconds = static_cast<float>(ms) / 1000.0f;
+  String arg = String(ms);
+  bool any = false;
+  for (int a = 0; a < n; ++a) {
+    arg += (a == 0) ? " " : " | ";
+    if (!moveAxis[a]) {
+      arg += "_";
+      continue;
+    }
+    const float dest = dmcStepsToMc(steps[a]);
+    const float dist = fabsf(dest - positionMm_[a]);
+    const float speed = seconds > 1.0f ? dist / (seconds - 1.0f) : (2.0f * dist / seconds);
+    const float accel = seconds > 1.0f ? speed : speed / (seconds * 0.5f);
+    if (a < kMaxAxes && (speed > config_.maxSpeed[a] + 0.05f || accel > config_.maxAccel[a] + 0.05f)) {
+      return false;
+    }
+    targetMm_[a] = dest;
+    movingMask_ |= (1U << a);
+    any = true;
+    arg += fmtMc(dest);
+  }
+  if (!any) {
+    return true;
+  }
+  lastMotionMs_ = millis();
+  sendCommand("MD", arg);
+  return true;
+}
+
+bool McSerialClient::moveForMs(uint32_t ms, uint32_t rampMs, const int32_t* steps, const bool* moveAxis, int n) {
+  if (ms < 1 || ms > 60000 || steps == nullptr || moveAxis == nullptr || rampMs < 1 || rampMs * 2 >= ms) {
+    return false;
+  }
+  if (n > advertisedMotors()) {
+    n = advertisedMotors();
+  }
+  commandError_ = false;
+  const float seconds = static_cast<float>(ms) / 1000.0f;
+  const float rampSec = static_cast<float>(rampMs) / 1000.0f;
+  String arg = String(ms) + " " + String(rampMs);
+  bool any = false;
+  for (int a = 0; a < n; ++a) {
+    arg += (a == 0) ? " " : " | ";
+    if (!moveAxis[a]) {
+      arg += "_";
+      continue;
+    }
+    const float dest = dmcStepsToMc(steps[a]);
+    const float dist = fabsf(dest - positionMm_[a]);
+    const float speed = dist / (seconds - rampSec);
+    const float accel = speed / rampSec;
+    if (a < kMaxAxes && (speed > config_.maxSpeed[a] + 0.05f || accel > config_.maxAccel[a] + 0.05f)) {
+      return false;
+    }
+    targetMm_[a] = dest;
+    movingMask_ |= (1U << a);
+    any = true;
+    arg += fmtMc(dest);
+  }
+  if (!any) {
+    return true;
+  }
+  lastMotionMs_ = millis();
+  sendCommand("MF", arg);
+  return true;
+}
+
 void McSerialClient::stopMotion() {
   movingMask_ = 0;
   memcpy(targetMm_, positionMm_, sizeof(targetMm_));
@@ -393,6 +497,64 @@ void McSerialClient::simulateCommand(const String& line) {
     simulateCgDump();
     return;
   }
+  if (trimmed.startsWith("MF ")) {
+    String rest = trimmed.substring(3);
+    rest.trim();
+    int sp = rest.indexOf(' ');
+    if (sp < 0) {
+      return;
+    }
+    rest = rest.substring(sp + 1);
+    rest.trim();
+    sp = rest.indexOf(' ');
+    String axes = sp < 0 ? String() : rest.substring(sp + 1);
+    int idx = 0;
+    int start = 0;
+    const int n = advertisedMotors();
+    while (idx < n && start <= axes.length()) {
+      const int pipe = axes.indexOf('|', start);
+      String tok = (pipe < 0) ? axes.substring(start) : axes.substring(start, pipe);
+      tok.trim();
+      if (tok.length() > 0 && tok != "_") {
+        targetMm_[idx] = tok.toFloat();
+      }
+      ++idx;
+      if (pipe < 0) {
+        break;
+      }
+      start = pipe + 1;
+    }
+    movingMask_ = 1;
+    lastMotionMs_ = millis();
+    handleMcLine("#M " + fmtMc(positionMm_[0]) + " 0.00 0.00");
+    return;
+  }
+  if (trimmed.startsWith("MD ")) {
+    String rest = trimmed.substring(3);
+    rest.trim();
+    const int sp = rest.indexOf(' ');
+    String axes = sp < 0 ? String() : rest.substring(sp + 1);
+    int idx = 0;
+    int start = 0;
+    const int n = advertisedMotors();
+    while (idx < n && start <= axes.length()) {
+      const int pipe = axes.indexOf('|', start);
+      String tok = (pipe < 0) ? axes.substring(start) : axes.substring(start, pipe);
+      tok.trim();
+      if (tok.length() > 0 && tok != "_") {
+        targetMm_[idx] = tok.toFloat();
+      }
+      ++idx;
+      if (pipe < 0) {
+        break;
+      }
+      start = pipe + 1;
+    }
+    movingMask_ = 1;
+    lastMotionMs_ = millis();
+    handleMcLine("#M " + fmtMc(positionMm_[0]) + " 0.00 0.00");
+    return;
+  }
   if (trimmed.startsWith("MT")) {
     parsePackedFloats(trimmed.substring(2), targetMm_, advertisedMotors());
     movingMask_ = 1;
@@ -553,6 +715,8 @@ void McSerialClient::handleMcLine(const String& line) {
     return;
   }
   if (clean.startsWith("!E:")) {
+    commandError_ = true;
+    movingMask_ = 0;
     debugLog("MC error: ", clean.c_str());
     return;
   }

@@ -37,6 +37,11 @@ class McSerialClient {
   int advertisedMotors() const;
 
   void moveAxisToSteps(int axis0, int32_t steps);
+  void moveToSteps(const int32_t* steps, int n);
+  bool moveDurationMs(uint32_t ms, const int32_t* steps, const bool* moveAxis, int n);
+  bool moveForMs(uint32_t ms, uint32_t rampMs, const int32_t* steps, const bool* moveAxis, int n);
+  bool blurEnabled(int axis0) const;
+  bool takeCommandError();
   void stopMotion();
   void resetAxisSteps(int axis0, int32_t steps);
   void setSpeedSteps(int axis0, int32_t velSteps, int32_t accelSteps);
@@ -87,6 +92,7 @@ class McSerialClient {
   bool liveApplied_ = false;
   bool configDrain_ = false;
   bool hardStop_ = false;
+  bool commandError_ = false;
   bool pathActive_ = false;
   bool pdStreaming_ = false;
   uint32_t movingMask_ = 0;

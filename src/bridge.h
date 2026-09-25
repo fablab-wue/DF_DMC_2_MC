@@ -32,6 +32,9 @@ class DmcBridge {
   void maybeSendPositionReport();
   void maybeUnsolicitedGio();
   void maybeFinishPath();
+  void maybeFinishShoot();
+  void handleShootFrame(const DmcFrame& frame);
+  void handleShootFrame2(const DmcFrame& frame);
   void fireBloop(unsigned ms);
   void applyFrameTrigger(int dfFrame);
   void pumpPendingPlay();
@@ -55,6 +58,19 @@ class DmcBridge {
   int pendingEnd_ = 1;
   unsigned pendingBloopMs_ = 0;
   uint32_t pendingPrerollMs_ = 0;
+  bool shootArmed_ = false;
+  bool shootGoing_ = false;
+  bool shootPendingMf_ = false;
+  bool shootShutterOn_ = false;
+  uint32_t shootT0_ = 0;
+  uint32_t shootMoveMs_ = 0;
+  uint32_t shootRampMs_ = 0;
+  uint32_t shootDelayMs_ = 0;
+  uint32_t shootShutterOpenMs_ = 0;
+  uint32_t shootShutterCloseMs_ = 0;
+  uint32_t shootDoneMs_ = 0;
+  int32_t shootEndSteps_[kMaxAxes]{};
+  bool shootBlur_[kMaxAxes]{};
 };
 
 }  // namespace sliderdmc
