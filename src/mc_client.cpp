@@ -113,7 +113,7 @@ void McSerialClient::sendCommand(const String& command, const String& argument) 
 void McSerialClient::requestConfig() { sendLine("CG"); }
 
 int McSerialClient::advertisedMotors() const {
-  int n = config_.axisCount;
+  int n = config_.motorCount + config_.servoCount;
   if (n < 1) {
     n = 1;
   }

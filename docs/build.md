@@ -37,7 +37,7 @@ Keep Dragonframe disconnected, one COM session:
 python pc_dmc_test.py COM21 --sequence hi
 ```
 
-Expect `type=0x0001`, `name="SliderCtrl MC V1 (dmc-lite)"`, `motors=1` (or live `axis`). Further sequences: `hi,status,position,config` and `hi,gio,dmx`. Script lives in the DF_DMC_2_MC repo.
+Expect `type=0x0001`, `name="jDF-MC V1 1M+0S+6L+4O+4I+CT+DMX"`, `motors=1` before the motion controller answers. After `CG` with 3 motors and 3 servos, a reconnect reports `name="jDF-MC V1 3M+3S+6L+4O+4I+CT+DMX"` and `motors=6`. Further sequences: `hi,status,position,config` and `hi,gio,dmx`. Script lives in the DF_DMC_2_MC repo.
 
 ## Dragonframe Connect
 

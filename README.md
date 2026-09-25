@@ -24,7 +24,7 @@ SliderMC
 
 ## Features
 
-- **Connect as dmc-lite** — hello name `SliderCtrl MC V1 (dmc-lite)`; Arc **steps per unit = 1000**
+- **Connect as dmc-lite** — hello name `jDF-MC V1 <motors>M+<servos>S+6L+4O+4I+CT+DMX`; Arc **steps per unit = 1000**
 - **Units** — 1000 DMC steps = 1 mm or 1 deg (same for speed/accel)
 - **Live GIO** — 4 out (GP1–4) / 4 in (GP5–8) on this Zero, not MC extenders
 - **DMX512** — 512 channels on GP0 (PIO UART + MAX485 for a real universe). Channels 1–6 also drive DMX1–DMX6 PWM at 18 kHz on GP29, GP28, GP27, GP26, GP15, GP14 (high-active, duty = level/255)

@@ -57,7 +57,6 @@ constexpr uint8_t kHelloVersionMajor = 1;
 constexpr uint8_t kHelloVersionMinor = 2;
 constexpr uint8_t kHelloVersionRev = 3;
 constexpr uint16_t kHelloProtocolVersion = 2;
-constexpr char kDmcHelloName[] = "SliderCtrl MC V1 (dmc-lite)";
 
 inline float dmcStepsToMc(int32_t steps) { return static_cast<float>(steps) / kDmcStepsPerUnit; }
 

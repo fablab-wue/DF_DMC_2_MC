@@ -28,11 +28,11 @@ Our behaviour (hello name, units, which opcodes we honour) is in this folder and
 
 ## Dragonframe Connect
 
-Dragonframe always starts with binary `MSG_HI` (`0x0001`). DF_DMC_2_MC replies with identity named **`SliderCtrl MC V1 (dmc-lite)`**. Device type in Scene → Connections stays **dmc-lite**. An unsolicited hello is also sent when the USB serial port opens.
+Dragonframe always starts with binary `MSG_HI` (`0x0001`). DF_DMC_2_MC replies with **`jDF-MC V1 <motors>M+<servos>S+6L+4O+4I+CT+DMX`**. Before the motion controller answers, that is **`jDF-MC V1 1M+0S+6L+4O+4I+CT+DMX`** and the motor count is 1. After `CG` and a Dragonframe reconnect, 3 motors and 3 servos become **`jDF-MC V1 3M+3S+6L+4O+4I+CT+DMX`** and the motor count is 6. Device type in Scene → Connections stays **dmc-lite**. An unsolicited hello is also sent when the USB serial port opens.
 
 Hello fields:
 
-- motor count from SliderMC `CG` `axis` (1–6; simulator stays at 1)
+- motor count is `motor_count + servo_count` from SliderMC `CG` (1–6; before `CG`, 1)
 - DMX count **512**
 - GIO out **4** / GIO in **4**
 - upload frame count **2048**
@@ -90,7 +90,7 @@ Shared Connect steps: [DF_DMC_Common — Dragonframe](https://github.com/fablab-
 
 | File | Role |
 |------|------|
-| `config.h` | Limits, pin map, 1000 steps = 1 mm/deg, hello name |
+| `config.h` | Limits, pin map, 1000 steps = 1 mm/deg |
 | `path_store` | DF upload table → MC `PD` samples (positions in the common path table) |
 | `mc_client` | SliderMC UART + simulator |
 | `status_led` | WS2812 / classic LED |
