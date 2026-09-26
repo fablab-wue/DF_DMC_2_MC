@@ -35,6 +35,7 @@ void DmcBridge::loop() {
   gio_.tick();
   maybeSendPositionReport();
   maybeUnsolicitedGio();
+  maybeRestoreBloop();
   maybeFinishPath();
   maybeFinishShoot();
   pumpPendingPlay();
@@ -143,10 +144,36 @@ void DmcBridge::maybeUnsolicitedGio() {
   }
 }
 
+void DmcBridge::maybeRestoreBloop() {
+  if (!bloopDmxOn_) {
+    return;
+  }
+  if (static_cast<int32_t>(millis() - bloopDmxUntilMs_) < 0) {
+    return;
+  }
+  dmx_.apply(bloopDmxChannel_, &bloopSavedLevel_, 1, false);
+  bloopDmxOn_ = false;
+}
+
 void DmcBridge::maybeFinishPath() {
   const bool active = mcClient_.pathActive();
-  if (wasPathActive_ && !active && dfConnected_ && !shootGoing_ && !shootPendingMf_) {
-    sendDmcFrame(0, kDmcMsgRtEnd, {});
+  const bool shoot = shootGoing_ || shootPendingMf_;
+  if (active) {
+    postrollWaiting_ = false;
+  } else if (wasPathActive_ && dfConnected_ && !shoot) {
+    if (pendingPostrollMs_ > 0) {
+      postrollUntilMs_ = millis() + pendingPostrollMs_;
+      pendingPostrollMs_ = 0;
+      postrollWaiting_ = true;
+    } else if (!postrollWaiting_) {
+      sendDmcFrame(0, kDmcMsgRtEnd, {});
+    }
+  }
+  if (postrollWaiting_ && static_cast<int32_t>(millis() - postrollUntilMs_) >= 0) {
+    postrollWaiting_ = false;
+    if (dfConnected_ && !shootGoing_ && !shootPendingMf_) {
+      sendDmcFrame(0, kDmcMsgRtEnd, {});
+    }
   }
   wasPathActive_ = active;
 }
@@ -448,6 +475,17 @@ void DmcBridge::pumpPendingPlay() {
   pendingPlay_ = false;
   if (pendingBloopMs_ > 0) {
     fireBloop(pendingBloopMs_);
+    if (pendingBloopDmx_ >= 1 && pendingBloopDmx_ <= kDmxChannels) {
+      if (bloopDmxOn_) {
+        dmx_.apply(bloopDmxChannel_, &bloopSavedLevel_, 1, false);
+      }
+      bloopDmxChannel_ = pendingBloopDmx_;
+      bloopSavedLevel_ = dmx_.levelAt(bloopDmxChannel_);
+      const uint8_t full = 255;
+      dmx_.apply(bloopDmxChannel_, &full, 1, false);
+      bloopDmxUntilMs_ = millis() + pendingBloopMs_;
+      bloopDmxOn_ = true;
+    }
   }
   applyFrameTrigger(pendingStart_);
   mcClient_.pathGoRange(pendingStart_, pendingEnd_);
@@ -732,9 +770,24 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
     }
-    case kDmcMsgRtUploadDmx:
-      sendDmcAck(frame.id, frame.type, kDmcAckErrUnsupported);
+    case kDmcMsgRtUploadDmx: {
+      uint16_t channel = 0;
+      uint32_t index = 0;
+      if (frame.payload.size() < 6 || !readWordLE(frame.payload, 0, &channel) || !readDwordLE(frame.payload, 2, &index)) {
+        sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+        break;
+      }
+      (void)index;
+      if (channel < 1 || channel > kDmxChannels) {
+        sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+        break;
+      }
+      if (frame.payload.size() == 7) {
+        dmx_.apply(channel, frame.payload.data() + 6, 1, false);
+      }
+      sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
+    }
     case kDmcMsgRtUploadTriggers: {
       uint32_t mask = 0;
       if (!readDwordLE(frame.payload, 0, &mask)) {
@@ -799,7 +852,6 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       if (frame.payload.size() >= 28) {
         readDwordLE(frame.payload, 16, &postrollMs);
       }
-      (void)postrollMs;
       if (frame.payload.size() >= 29) {
         readByte(frame.payload, 20, &syncDmx);
       }
@@ -810,7 +862,6 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       if (frame.payload.size() >= 35) {
         readWordLE(frame.payload, 25, &bloopDmx);
       }
-      (void)bloopDmx;
       if (frame.payload.size() >= 37) {
         readWordLE(frame.payload, 27, &bloopTime);
       }
@@ -823,6 +874,9 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       pendingStart_ = startFrame;
       pendingEnd_ = endFrame;
       pendingBloopMs_ = (bloopLoc != 0 || bloopTime != 0) ? (bloopTime == 0 ? 100 : bloopTime) : 0;
+      pendingBloopDmx_ = bloopDmx;
+      pendingPostrollMs_ = postrollMs;
+      postrollWaiting_ = false;
       pendingPrerollMs_ = prerollMs;
       pendingPlayAtMs_ = millis() + prerollMs;
       pendingPlay_ = true;

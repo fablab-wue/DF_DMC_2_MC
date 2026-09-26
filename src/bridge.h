@@ -32,6 +32,7 @@ class DmcBridge {
   void maybeSendPositionReport();
   void maybeUnsolicitedGio();
   void maybeFinishPath();
+  void maybeRestoreBloop();
   void maybeFinishShoot();
   void handleShootFrame(const DmcFrame& frame);
   void handleShootFrame2(const DmcFrame& frame);
@@ -57,6 +58,14 @@ class DmcBridge {
   int pendingStart_ = 1;
   int pendingEnd_ = 1;
   unsigned pendingBloopMs_ = 0;
+  uint16_t pendingBloopDmx_ = 0;
+  uint16_t bloopDmxChannel_ = 0;
+  uint8_t bloopSavedLevel_ = 0;
+  uint32_t bloopDmxUntilMs_ = 0;
+  bool bloopDmxOn_ = false;
+  uint32_t pendingPostrollMs_ = 0;
+  uint32_t postrollUntilMs_ = 0;
+  bool postrollWaiting_ = false;
   uint32_t pendingPrerollMs_ = 0;
   bool shootArmed_ = false;
   bool shootGoing_ = false;
