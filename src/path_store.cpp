@@ -128,4 +128,17 @@ void PathStore::fillPd(int sample, int16_t* out) const {
 
 uint8_t PathStore::triggerAtLocal(int localFrame) const { return table_.triggerAtLocal(localFrame); }
 
+int PathStore::frameForSample(int sample) const {
+  int local = 0;
+  const int frames = table_.frameCount();
+  for (int f = 0; f < frames; ++f) {
+    if (static_cast<int>(frameToSample_[f]) <= sample) {
+      local = f;
+    } else {
+      break;
+    }
+  }
+  return table_.startFrame() + local;
+}
+
 }  // namespace sliderdmc

@@ -23,7 +23,7 @@ constexpr bool kUseClassicLed = (SLIDERDMC_STATUS_LED_MODE == 0);
 constexpr bool kUseNeoPixel = (SLIDERDMC_STATUS_LED_MODE == 1);
 
 constexpr int kMaxAxes = 6;
-constexpr int kMaxUploadFrames = 2048;
+constexpr int kMaxUploadFrames = 1440;
 constexpr int kMaxPathSamples = 4096;
 constexpr int kDmxChannels = 512;
 

@@ -15,6 +15,9 @@ class PathStore {
  public:
   void beginUpload(int32_t startFrame, int32_t endFrame, int axisCount);
   bool storeAxis(int motor1, uint32_t index, const int32_t* values, int n, bool finalFill);
+  bool storeDmx(int channel1, uint32_t index, const uint8_t* levels, int n, bool finalFill) {
+    return table_.storeDmx(channel1, index, levels, n, finalFill);
+  }
   void storeTrigger(uint32_t mask, uint32_t index, uint32_t value);
   bool buildPd();
 
@@ -31,6 +34,10 @@ class PathStore {
   bool sampleRangeForFrames(int dfStart, int dfEnd, int* mcStart0, int* mcEnd0) const;
   void fillPd(int sample, int16_t* out) const;
   uint8_t triggerAtLocal(int localFrame) const;
+  int dmxSlotCount() const { return table_.dmxSlotCount(); }
+  uint16_t dmxChannel(int slot) const { return table_.dmxChannel(slot); }
+  uint8_t dmxLevel(int slot, int localFrame) const { return table_.dmxLevel(slot, localFrame); }
+  int frameForSample(int sample) const;
 
  private:
   dfdmc::PathTable table_;

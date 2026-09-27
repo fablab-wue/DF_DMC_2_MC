@@ -9,25 +9,26 @@ Motor payloads are **1-based**. Unknown types return ACK `0x0013` (unsupported).
 | DMC | Meaning | MC / local |
 |-----|---------|------------|
 | `0x0001` | hello / identify | hello reply, no ACK |
-| `0x0020` | live DMX | 512-ch buffer on GP0; channels 1–6 also PWM (DMX1–DMX6). RAMP=0 snap, RAMP=1 linear ramp. Per-frame `0x0102` → `ERR_UNSUPPORTED` |
+| `0x0020` | live DMX | 512-ch buffer on GP0; channels 1–6 also PWM (DMX1–DMX6). RAMP=0 snap, RAMP=1 linear ramp. Timeline `0x0102` stores up to 32 channels by 1440 frames; a further channel returns `0x0014` |
 | `0x0021` | GIO out | GP1–4 |
 | `0x0022` | GIO in | GP5–8 (data reply) |
 | `0x0023` | camera | shutter: GP9 + `CT`; meter: ACK only |
 | `0x0030` | motor status | moving bitmask + DMX-ramp byte |
 | `0x0031` | absolute move | `MT` (÷1000) |
-| `0x0032` / `0x0033` | stop | `MS` |
+| `0x0032` | stop one axis | `MT` with that axis at its current position and `_` on the others |
+| `0x0033` | stop all | `MS` |
 | `0x0034` | get position | `IP` plus one DWORD per motor (×1000) |
 | `0x0035` | reset position | `SP` (no motion) |
-| `0x0036` | jog | `MT` |
+| `0x0036` | jog | `SS` at configured speed × jog word / 10000, then `MT`. Outside `SL`/`SR` returns `0x0021` or `0x0020` |
 | `0x0037` | configure | store enable flags |
 | `0x0038` | set speed | `SS` / `SA` (÷1000, clamped to MC max) |
 | `0x0039` | set limits | `SL` / `SR` |
 | `0x003A` | hard stop | `MS` |
 | `0x0100` / `0x0101` / `0x0103` | upload begin/axis/end | RAM table + `PC`/`PD` (µm = DMC step delta; split if \|delta\| > 32767) |
 | `0x0104` | RT triggers | apply GIO OUT bits at those frames |
-| `0x0110` | position frame | `MT` to that pose |
-| `0x0111` | run move | FPS×1000 → `PS`; `MT` start; bloop GP10+`BE`; then `PG start end` |
-| `0x0113` | go | `PG` range |
+| `0x0110` | position frame | `MT` to that pose, stored DMX for that frame, position report with the frame number |
+| `0x0111` | run move | FPS×1000 → `PS`; `MT` start pose; wait for go. Does not start `PG` |
+| `0x0113` | go | `PG` range if the start pose is idle; otherwise `0x0016`. Each new frame sends a position report |
 | `0x0114` | end | sent when path finishes |
 | `0x0120` | jog all | FPS×1000 → `PS`; `PG` current→dest |
 

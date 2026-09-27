@@ -56,7 +56,33 @@ SEQUENCE_ALIASES = {
         + (3).to_bytes(2, byteorder="little", signed=False)
         + bytes([0, 0xFF, 0x80, 0x00]),
     ),
+    "upload_begin": (
+        0x0100,
+        (1).to_bytes(4, byteorder="little", signed=True)
+        + (2).to_bytes(4, byteorder="little", signed=True),
+    ),
+    "upload_axis": (
+        0x0101,
+        bytes([1])
+        + (0).to_bytes(4, byteorder="little", signed=False)
+        + (0).to_bytes(4, byteorder="little", signed=True)
+        + (1000).to_bytes(4, byteorder="little", signed=True),
+    ),
+    "upload_end": (0x0103, b""),
+    "posframe": (0x0110, (1).to_bytes(4, byteorder="little", signed=True)),
+    "runmove": (
+        0x0111,
+        (24000).to_bytes(4, byteorder="little", signed=False)
+        + (1).to_bytes(4, byteorder="little", signed=True)
+        + (2).to_bytes(4, byteorder="little", signed=True)
+        + (0).to_bytes(4, byteorder="little", signed=False)
+        + (0).to_bytes(4, byteorder="little", signed=False)
+        + bytes([1]),
+    ),
+    "go": (0x0113, b""),
 }
+
+PLAY_SEQUENCE = ("upload_begin", "upload_axis", "upload_end", "posframe", "runmove", "go")
 
 
 def compute_checksum(data: bytes) -> int:
@@ -197,6 +223,9 @@ def parse_sequence(sequence: str) -> List[Tuple[int, bytes]]:
         token = token.strip()
         if not token:
             continue
+        if token.lower() == "play":
+            packets.extend(sequence_from_name(name) for name in PLAY_SEQUENCE)
+            continue
         if token.startswith("0x") or token.startswith("0X"):
             packets.append((int(token, 16), b""))
         else:
@@ -289,7 +318,7 @@ def main() -> None:
     parser.add_argument(
         "--sequence",
         default=DEFAULT_SEQUENCE,
-        help="Comma-separated packet names: hi,status,config,move,stop,reset,jog,speed,limits,position,gio,gio_in,gio_cam,dmx",
+        help="Comma-separated packet names. 'play' is upload, position-frame, run-move, then go",
     )
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--read-timeout", type=float, default=2.0)

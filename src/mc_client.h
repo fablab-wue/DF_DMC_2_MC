@@ -37,12 +37,15 @@ class McSerialClient {
   int advertisedMotors() const;
 
   void moveAxisToSteps(int axis0, int32_t steps);
+  void jogAxisToSteps(int axis0, int32_t steps, uint16_t speedWord);
   void moveToSteps(const int32_t* steps, int n);
   bool moveDurationMs(uint32_t ms, const int32_t* steps, const bool* moveAxis, int n);
   bool moveForMs(uint32_t ms, uint32_t rampMs, const int32_t* steps, const bool* moveAxis, int n);
   bool blurEnabled(int axis0) const;
   bool takeCommandError();
   void stopMotion();
+  void stopAxis(int axis0);
+  int limitFault(int axis0, int32_t steps) const;
   void resetAxisSteps(int axis0, int32_t steps);
   void setSpeedSteps(int axis0, int32_t velSteps, int32_t accelSteps);
   void setLimitsSteps(int axis0, bool lowerEn, int32_t lower, bool upperEn, int32_t upper);
@@ -67,6 +70,7 @@ class McSerialClient {
   bool hardStopLatched();
   int currentFrame() const { return currentFrame_; }
   void setCurrentFrame(int f) { currentFrame_ = f; }
+  bool takeFrameEdge();
   int32_t positionSteps(int axis0) const;
   void update();
 
@@ -110,6 +114,14 @@ class McSerialClient {
   uint32_t simPathNextMs_ = 0;
   float sessionSpeed_ = 40.0f;
   float sessionAccel_ = 20.0f;
+  float axisSpeed_[kMaxAxes] = {40, 40, 40, 40, 40, 40};
+  float jogSpeed_ = -1.0f;
+  bool loEn_[kMaxAxes]{};
+  bool hiEn_[kMaxAxes]{};
+  float lo_[kMaxAxes]{};
+  float hi_[kMaxAxes]{};
+  bool frameEdge_ = false;
+  uint32_t piDueMs_ = 0;
   float positionMm_[kMaxAxes]{};
   float targetMm_[kMaxAxes]{};
   uint8_t motorConfig_[kMaxAxes]{};

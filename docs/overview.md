@@ -35,7 +35,7 @@ Hello fields:
 - motor count is `motor_count + servo_count` from SliderMC `CG` (1–6; before `CG`, 1)
 - DMX count **512**
 - GIO out **4** / GIO in **4**
-- upload frame count **2048**
+- upload frame count **1440**
 - capabilities `REAL_TIME` + `REAL_TIME_CAMERA`
 - protocol version **2**, firmware `1.2.3`
 
@@ -62,6 +62,8 @@ DMC positions, speeds, and limits are signed integers with no unit field. DF_DMC
 Conversion is only `÷ 1000` into SliderMC millimetres/degrees (`MT`, `SS`, `SA`, `SL`/`SR`). Do **not** scale by MC `steps_per_unit_N`; MC already turns mm into motor steps. Reset pose uses `SP` (no motion), not `MH`.
 
 Scene FPS is **not** in hello. Dragonframe sends FPS×1000 only on `MSG_RT_RUN_MOVE` (`0x0111`) and `MSG_RT_JOG_ALL` (`0x0120`). That becomes MC `PS` (µs per frame), e.g. 24 fps → `24000` → `PS 41667`. Shoot-move-shoot has no FPS.
+
+`MSG_RT_RUN_MOVE` moves to the start pose and waits for `MSG_RT_GO`. Each new played frame sends a position report with that frame number. A lighting program stores up to 32 DMX channels across the 1440 frames and is applied when the move asked to sync DMX. Jog speed is the axis `SS` times the Dragonframe speed word (1–10000). Stopping one axis sends `MT` for that axis only. A target outside the soft window returns `0x0021` (below) or `0x0020` (above) and is not sent to SliderMC.
 
 ## Simulator
 

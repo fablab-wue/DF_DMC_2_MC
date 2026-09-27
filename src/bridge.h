@@ -26,7 +26,7 @@ class DmcBridge {
   void sendDmcAck(uint32_t id, uint16_t type, uint32_t status);
   void sendDmcHello(uint32_t id);
   void sendMotorStatus(uint32_t id);
-  void sendMotorPositions(uint32_t id);
+  void sendMotorPositions(uint32_t id, int32_t frameTime = 0);
   void sendGioIn(uint32_t id);
   void maybeSendBootHello();
   void maybeSendPositionReport();
@@ -38,6 +38,7 @@ class DmcBridge {
   void handleShootFrame2(const DmcFrame& frame);
   void fireBloop(unsigned ms);
   void applyFrameTrigger(int dfFrame);
+  void applyProgramDmx(int dfFrame);
   void pumpPendingPlay();
   uint32_t psFromFpsX1000(uint32_t fpsX1000) const;
   void handleDmcFrame(const DmcFrame& frame);
@@ -54,6 +55,8 @@ class DmcBridge {
   bool dfConnected_ = false;
   bool bootHelloSent_ = false;
   bool pendingPlay_ = false;
+  bool armedPlay_ = false;
+  bool syncDmx_ = false;
   bool wasPathActive_ = false;
   int pendingStart_ = 1;
   int pendingEnd_ = 1;

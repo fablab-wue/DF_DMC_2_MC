@@ -70,15 +70,19 @@ GP0 is **TX only** (PIO UART). A MAX485 (or SN75176 / similar) turns TTL into RS
 XLR3 (DMX512): **pin 1** shield/GND, **pin 2** Data− (A), **pin 3** Data+ (B). Put **120 Ω** between A and B at the **last fixture**. If the DMC is a bus end, terminate there too. Do not terminate every fixture.
 
 ```text
-  RP2040-Zero                         MAX485                 XLR3 (female, to fixtures)
-  3.3V ------------------------------- VCC
-  GND  ------------------------------- GND --------------- pin 1  shield / GND
-  GP0  ------------------------------- DI
-  3.3V ------------------------------- DE
-  3.3V ------------------------------- /RE
-                                       RO  (leave open)
-                                       A  ---------------- pin 2  Data−
-                                       B  ---------------- pin 3  Data+
+    RP2040-Zero                    MAX485                         XLR3 female
+  5V  ------------------------  8 VCC
+  GND ------------------------  5 GND  ---------------------  pin 1 + shield
+
+  GP0 ------------------------  4 DI
+
+  5V  ----------------------+-  3 DE
+                            +-  2 /RE
+
+                                1 RO     leave open
+
+                                7 B   ---------------------  pin 2  Data−
+                                6 A   ---------------------  pin 3  Data+
 
   Last fixture (or DMC if it is a bus end):
        A ---- 120 Ω ---- B
