@@ -4,6 +4,16 @@
 
 Firmware: [DF_DMC_2_MC](https://github.com/fablab-wue/DF_DMC_2_MC). Board: **Waveshare RP2040-Zero**. Core: earlephilhower Arduino Pico via PlatformIO (`env:rpipico`, `board = pico` — GPIO numbers match the Zero map in [pins.md](pins.md)).
 
+## Flash a release
+
+No compiler and no PlatformIO.
+
+1. Download `DF_DMC_2_MC-<tag>-rp2040zero.uf2` from the [Releases](https://github.com/fablab-wue/DF_DMC_2_MC/releases) page.
+2. Hold **BOOTSEL**, plug in USB, then release BOOTSEL.
+3. Copy the UF2 onto the `RPI-RP2` drive. The board reboots into the new firmware.
+
+The published file keeps `-DSIMULATE`: after about 2 s with no MC banner/`CG`, it runs a 1-axis simulator. A new file is built when a `v*` tag is pushed. Rebuild an existing tag from the Actions page with **Run workflow**.
+
 ## Prerequisites (Windows)
 
 1. Install [VS Code](https://code.visualstudio.com/).

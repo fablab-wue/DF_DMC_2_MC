@@ -1,0 +1,108 @@
+name: Firmware UF2
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (for example v1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9A-Za-z._+-]+$'; then
+            echo "Tag must look like v1.0 (got: $tag)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          path: DF_DMC_2_MC
+
+      - uses: actions/checkout@v4
+        with:
+          repository: fablab-wue/DF_DMC_Common
+          ref: main
+          path: DF_DMC_Common
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-DF_DMC_2_MC-${{ hashFiles('DF_DMC_2_MC/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-DF_DMC_2_MC-
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build
+        working-directory: DF_DMC_2_MC
+        run: python -m platformio run -e rpipico
+
+      - name: Rename UF2
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: cp DF_DMC_2_MC/.pio/build/rpipico/firmware.uf2 "DF_DMC_2_MC-${TAG}-rp2040zero.uf2"
+
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          cat > notes.md << EOF
+          ## Flash without compiling
+
+          Board: **Waveshare RP2040-Zero**.
+
+          1. Download \`DF_DMC_2_MC-${TAG}-rp2040zero.uf2\`.
+          2. Hold **BOOTSEL**, plug in USB, then release BOOTSEL.
+          3. Copy the UF2 onto the \`RPI-RP2\` drive.
+          4. The board reboots into the new firmware.
+
+          This is the default firmware, including \`-DSIMULATE\`: a 1-axis stand-in only if no SliderMC answers within about 2 seconds.
+
+          USB CDC is binary DMC. It is not a text console.
+          EOF
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          asset="DF_DMC_2_MC-${TAG}-rp2040zero.uf2"
+          if [ ! -f "$asset" ]; then
+            echo "Missing $asset"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+            gh release upload "$TAG" "$asset" --clobber
+          else
+            gh release create "$TAG" "$asset" --title "DF_DMC_2_MC ${TAG}" --notes-file notes.md
+          fi
