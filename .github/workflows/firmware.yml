@@ -100,9 +100,10 @@ jobs:
             echo "Missing $asset"
             exit 1
           fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file notes.md
-            gh release upload "$TAG" "$asset" --clobber
+          repo="$GITHUB_REPOSITORY"
+          if gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$repo" --notes-file notes.md
+            gh release upload "$TAG" --repo "$repo" --clobber "$asset"
           else
-            gh release create "$TAG" "$asset" --title "DF_DMC_2_MC ${TAG}" --notes-file notes.md
+            gh release create "$TAG" --repo "$repo" --verify-tag --title "DF_DMC_2_MC ${TAG}" --notes-file notes.md "$asset"
           fi
