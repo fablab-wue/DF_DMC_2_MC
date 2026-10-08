@@ -30,6 +30,7 @@ class PathStore {
   uint32_t triggerMask() const { return table_.triggerMask(); }
 
   int32_t positionSteps(int axis0, int localFrame) const;
+  int32_t sampleSteps(int axis0, double frameTime, bool extrapolate) const;
   bool localFrame(int dfFrame, int* out) const;
   bool sampleRangeForFrames(int dfStart, int dfEnd, int* mcStart0, int* mcEnd0) const;
   void fillPd(int sample, int16_t* out) const;

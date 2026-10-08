@@ -84,6 +84,10 @@ int32_t PathStore::positionSteps(int axis0, int localFrame) const {
   return table_.positionSteps(axis0, localFrame);
 }
 
+int32_t PathStore::sampleSteps(int axis0, double frameTime, bool extrapolate) const {
+  return table_.sampleSteps(axis0, frameTime, extrapolate);
+}
+
 bool PathStore::localFrame(int dfFrame, int* out) const { return table_.localFrame(dfFrame, out); }
 
 bool PathStore::sampleRangeForFrames(int dfStart, int dfEnd, int* mcStart0, int* mcEnd0) const {

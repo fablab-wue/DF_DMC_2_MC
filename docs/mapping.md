@@ -26,15 +26,15 @@ Motor payloads are **1-based**. Unknown types return ACK `0x0013` (unsupported).
 | `0x003A` | hard stop | `MS` |
 | `0x0100` / `0x0101` / `0x0103` | upload begin/axis/end | RAM table + `PC`/`PD` (µm = DMC step delta; split if \|delta\| > 32767) |
 | `0x0104` | RT triggers | apply GIO OUT bits at those frames |
-| `0x0110` | position frame | `MT` to that pose, stored DMX for that frame, position report with the frame number |
-| `0x0111` | run move | FPS×1000 → `PS`; `MT` start pose; wait for go. Does not start `PG` |
-| `0x0113` | go | `PG` range if the start pose is idle; otherwise `0x0016`. Each new frame sends a position report |
-| `0x0114` | end | sent when path finishes |
+| `0x0110` | position frame | `MT` to that pose, stored DMX for that frame, position report in thousandths of a frame |
+| `0x0111` | run move | FPS×1000 → `PS`; `MT` to the preroll pose; wait for go. Does not start `PG` |
+| `0x0113` | go | `PG` over the uploaded start..end if that pose is idle; otherwise `0x0016`. Each new frame sends a position report in thousandths of a frame |
+| `0x0114` | end | sent when playback finishes, including the postroll move, and when a go-motion shoot finishes or aborts |
 | `0x0120` | jog all | FPS×1000 → `PS`; `PG` current→dest |
 
 `MSG_HI` and local GIO/DMX are answered even before MC/simulator is ready. Motion commands without MC and with simulator **off** get DMC error `0x0015`.
 
-E-stop / hard limit: MC `#E` / `#L` / `IE:1` is reported as DMC hard-stop.
+E-stop / hard limit: MC `#E` / `#L` / `IE:1` is reported as a device `MSG_MOTOR_HARD_STOP` (no ACK flag) with reason `0`. Those replies do not name the motor or which limit.
 
 ## Path play (`PG`)
 

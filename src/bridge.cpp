@@ -21,6 +21,7 @@ void DmcBridge::setup() {
 }
 
 void DmcBridge::loop() {
+  noteCdc(static_cast<bool>(Serial));
   maybeSendBootHello();
   while (Serial.available()) {
     const uint8_t byte = static_cast<uint8_t>(Serial.read());
@@ -35,7 +36,12 @@ void DmcBridge::loop() {
   gio_.tick();
   maybeSendPositionReport();
   maybeUnsolicitedGio();
-  maybeRestoreBloop();
+  bloop_.tick(gio_, dmx_);
+  shutter_.tick(gio_);
+  if (mcClient_.hardStopLatched()) {
+    sendHardStop(0);
+    cancelLive(true);
+  }
   maybeFinishPath();
   maybeFinishShoot();
   pumpPendingPlay();
@@ -45,10 +51,10 @@ void DmcBridge::loop() {
       applyProgramDmx(frame);
     }
     applyFrameTrigger(frame);
-    sendMotorPositions(0, frame);
-  }
-  if (mcClient_.hardStopLatched()) {
-    sendDmcAck(0, kDmcMsgMotorHardStop, kDmcAckOk);
+    if (inRun(frame)) {
+      shutter_.beginFrame(gio_);
+    }
+    sendMotorPositions(0, static_cast<int32_t>(moveTimeThousandths(frame)));
   }
   statusLed_.update(dfConnected_, mcClient_.mcPresent(), mcClient_.simulatorActive(),
                     mcClient_.startupTimedOut());
@@ -69,7 +75,7 @@ void DmcBridge::sendDmcFrame(uint32_t id, uint16_t type, const std::vector<uint8
   packet.insert(packet.end(), payload.begin(), payload.end());
   const uint16_t rawChecksum = computeChecksum(packet.data(), packet.size());
   appendWordLE(packet, encodeChecksum(rawChecksum));
-  Serial.write(packet.data(), packet.size());
+  writeUsbFrame(packet.data(), packet.size());
 }
 
 void DmcBridge::sendDmcAck(uint32_t id, uint16_t type, uint32_t status) {
@@ -143,7 +149,11 @@ void DmcBridge::maybeSendPositionReport() {
     return;
   }
   lastPositionTxMs_ = now;
-  sendMotorPositions(0);
+  if (postrollWaiting_) {
+    sendMotorPositions(0, static_cast<int32_t>(moveTimeThousandths(static_cast<int32_t>(lround(postrollFrame_)))));
+  } else {
+    sendMotorPositions(0);
+  }
 }
 
 void DmcBridge::maybeUnsolicitedGio() {
@@ -152,34 +162,137 @@ void DmcBridge::maybeUnsolicitedGio() {
   }
 }
 
-void DmcBridge::maybeRestoreBloop() {
-  if (!bloopDmxOn_) {
-    return;
+void DmcBridge::noteCdc(bool up) {
+  if (cdcWasUp_ && !up) {
+    dfConnected_ = false;
+    bootHelloSent_ = false;
+    dmcParser_.reset();
+    cancelLive(false);
   }
-  if (static_cast<int32_t>(millis() - bloopDmxUntilMs_) < 0) {
-    return;
+  cdcWasUp_ = up;
+}
+
+void DmcBridge::sendHardStop(uint8_t reason) {
+  std::vector<uint8_t> payload;
+  appendByte(payload, reason);
+  sendDmcFrame(0, kDmcMsgMotorHardStop, payload);
+}
+
+void DmcBridge::endShoot(bool notify) {
+  const bool pending = shootNeedsEnd_;
+  if (shootShutterOn_) {
+    gio_.setCameraShutter(false);
+    shootShutterOn_ = false;
   }
-  dmx_.apply(bloopDmxChannel_, &bloopSavedLevel_, 1, false);
-  bloopDmxOn_ = false;
+  shootArmed_ = false;
+  shootGoing_ = false;
+  shootPendingMf_ = false;
+  shootNeedsEnd_ = false;
+  if (notify && pending && dfConnected_) {
+    sendDmcFrame(0, kDmcMsgRtEnd, {});
+  }
+}
+
+void DmcBridge::cancelLive(bool notify) {
+  const bool playback = wasPathActive_ || postrollWaiting_ || pendingPlay_ || armedPlay_ || mcClient_.pathActive();
+  mcClient_.stopMotion();
+  mcClient_.takeCommandError();
+  armedPlay_ = false;
+  pendingPlay_ = false;
+  postrollWaiting_ = false;
+  postrollMoveSent_ = false;
+  pendingPostrollMs_ = 0;
+  shutter_.endMove(gio_);
+  bloop_.release(gio_, dmx_);
+  if (shootNeedsEnd_) {
+    endShoot(notify);
+    wasPathActive_ = false;
+  } else if (notify && playback && dfConnected_) {
+    wasPathActive_ = false;
+    sendDmcFrame(0, kDmcMsgRtEnd, {});
+  } else {
+    wasPathActive_ = false;
+  }
+}
+
+bool DmcBridge::moveToSample(double frameTime) {
+  if (mcClient_.pathActive()) {
+    mcClient_.stopMotion();
+    mcClient_.takeCommandError();
+  }
+  const int n = mcClient_.advertisedMotors();
+  int32_t steps[kMaxAxes] = {};
+  bool differ = false;
+  for (int a = 0; a < n; ++a) {
+    steps[a] = path_.sampleSteps(a, frameTime, true);
+    if (steps[a] != mcClient_.positionSteps(a)) {
+      differ = true;
+    }
+  }
+  mcClient_.setCurrentFrame(static_cast<int>(lround(frameTime)));
+  if (differ) {
+    mcClient_.moveToSteps(steps, n);
+  }
+  return differ;
+}
+
+uint32_t DmcBridge::poseFault(double frameTime, bool extrapolate) const {
+  const int n = mcClient_.advertisedMotors();
+  for (int a = 0; a < n; ++a) {
+    const int fault = mcClient_.limitFault(a, path_.sampleSteps(a, frameTime, extrapolate));
+    if (fault != 0) {
+      return static_cast<uint32_t>(fault);
+    }
+  }
+  return 0;
+}
+
+bool DmcBridge::rejectRunLimits(const RtRunMove& move, const RtPlaySpan& span, uint32_t id) {
+  if (poseFault(span.prerollFrame, true) != 0) {
+    sendDmcAck(id, kDmcMsgRtRunMove, kDmcAckErrPreroll);
+    return true;
+  }
+  if (poseFault(span.postrollFrame, true) != 0) {
+    sendDmcAck(id, kDmcMsgRtRunMove, kDmcAckErrPostroll);
+    return true;
+  }
+  const int lo = move.startFrame < move.endFrame ? move.startFrame : move.endFrame;
+  const int hi = move.startFrame < move.endFrame ? move.endFrame : move.startFrame;
+  const int from = lo > path_.startFrame() ? lo : path_.startFrame();
+  const int to = hi < path_.endFrame() ? hi : path_.endFrame();
+  for (int f = from; f <= to; ++f) {
+    const uint32_t fault = poseFault(static_cast<double>(f), false);
+    if (fault != 0) {
+      sendDmcAck(id, kDmcMsgRtRunMove, fault);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DmcBridge::inRun(int frame) const {
+  const int lo = runStart_ < runEnd_ ? runStart_ : runEnd_;
+  const int hi = runStart_ < runEnd_ ? runEnd_ : runStart_;
+  return frame >= lo && frame <= hi;
 }
 
 void DmcBridge::maybeFinishPath() {
   const bool active = mcClient_.pathActive();
-  const bool shoot = shootGoing_ || shootPendingMf_;
+  const bool shoot = shootGoing_ || shootPendingMf_ || shootArmed_;
   if (active) {
     postrollWaiting_ = false;
-  } else if (wasPathActive_ && dfConnected_ && !shoot) {
-    if (pendingPostrollMs_ > 0) {
-      postrollUntilMs_ = millis() + pendingPostrollMs_;
-      pendingPostrollMs_ = 0;
-      postrollWaiting_ = true;
-    } else if (!postrollWaiting_) {
-      sendDmcFrame(0, kDmcMsgRtEnd, {});
-    }
-  }
-  if (postrollWaiting_ && static_cast<int32_t>(millis() - postrollUntilMs_) >= 0) {
+  } else if (wasPathActive_ && !shoot && !postrollWaiting_) {
+    postrollMoveSent_ = moveToSample(postrollFrame_);
+    postrollUntilMs_ = millis() + pendingPostrollMs_;
+    pendingPostrollMs_ = 0;
+    postrollWaiting_ = true;
+  } else if (postrollWaiting_ && !mcClient_.pathActive() && static_cast<int32_t>(millis() - postrollUntilMs_) >= 0 &&
+             (!postrollMoveSent_ || !mcClient_.moving())) {
     postrollWaiting_ = false;
-    if (dfConnected_ && !shootGoing_ && !shootPendingMf_) {
+    postrollMoveSent_ = false;
+    if (dfConnected_ && !shoot) {
+      shutter_.endMove(gio_);
+      bloop_.release(gio_, dmx_);
       sendDmcFrame(0, kDmcMsgRtEnd, {});
     }
   }
@@ -191,20 +304,19 @@ void DmcBridge::maybeFinishShoot() {
     return;
   }
   if (mcClient_.takeCommandError()) {
-    if (shootShutterOn_) {
-      gio_.setCameraShutter(false);
-      shootShutterOn_ = false;
-    }
-    shootGoing_ = false;
-    shootPendingMf_ = false;
-    shootArmed_ = false;
+    endShoot(true);
+    wasPathActive_ = false;
+    postrollWaiting_ = false;
+    postrollMoveSent_ = false;
     return;
   }
   const uint32_t elapsed = millis() - shootT0_;
   if (shootPendingMf_ && elapsed >= shootDelayMs_) {
     if (!mcClient_.moveForMs(shootMoveMs_, shootRampMs_, shootEndSteps_, shootBlur_, mcClient_.advertisedMotors())) {
-      shootPendingMf_ = false;
-      shootGoing_ = false;
+      endShoot(true);
+      wasPathActive_ = false;
+      postrollWaiting_ = false;
+      postrollMoveSent_ = false;
       return;
     }
     shootPendingMf_ = false;
@@ -222,7 +334,7 @@ void DmcBridge::maybeFinishShoot() {
     shootShutterOn_ = false;
   }
   if (elapsed >= shootDoneMs_ && !mcClient_.moving()) {
-    shootGoing_ = false;
+    endShoot(true);
   }
 }
 
@@ -268,7 +380,7 @@ void DmcBridge::handleShootFrame(const DmcFrame& frame) {
     return;
   }
   if (mcClient_.moving() || shootGoing_ || shootPendingMf_) {
-    sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
+    sendDmcAck(frame.id, frame.type, kDmcAckErrMoving);
     return;
   }
   if (blurX10 == 0) {
@@ -337,6 +449,7 @@ void DmcBridge::handleShootFrame(const DmcFrame& frame) {
   shootGoing_ = false;
   shootShutterOn_ = false;
   shootArmed_ = true;
+  shootNeedsEnd_ = true;
   mcClient_.moveToSteps(startSteps, n);
   sendDmcAck(frame.id, frame.type, kDmcAckOk);
 }
@@ -448,18 +561,9 @@ void DmcBridge::handleShootFrame2(const DmcFrame& frame) {
   shootGoing_ = false;
   shootShutterOn_ = false;
   shootArmed_ = true;
+  shootNeedsEnd_ = true;
   mcClient_.moveToSteps(startSteps, n);
   sendDmcAck(frame.id, frame.type, kDmcAckOk);
-}
-
-void DmcBridge::fireBloop(unsigned ms) {
-  if (ms == 0) {
-    ms = 100;
-  }
-  gio_.pulseBuzzer(ms);
-  if (mcClient_.ready()) {
-    mcClient_.beep(ms);
-  }
 }
 
 void DmcBridge::applyProgramDmx(int dfFrame) {
@@ -481,47 +585,33 @@ void DmcBridge::applyFrameTrigger(int dfFrame) {
   if (path_.triggerMask() == 0 || !path_.localFrame(dfFrame, &local)) {
     return;
   }
-  gio_.setOutputs(path_.triggerAtLocal(local));
+  gio_.setOutputs(path_.triggerAtLocal(local) | bloop_.heldOutputs());
 }
 
 void DmcBridge::pumpPendingPlay() {
   if (!pendingPlay_) {
     return;
   }
-  if (!mcClient_.pathStreamDone()) {
+  if (!mcClient_.pathStreamDone() || mcClient_.moving()) {
     return;
   }
   if (millis() < pendingPlayAtMs_) {
     return;
   }
   pendingPlay_ = false;
-  if (pendingBloopMs_ > 0) {
-    fireBloop(pendingBloopMs_);
-    if (pendingBloopDmx_ >= 1 && pendingBloopDmx_ <= kDmxChannels) {
-      if (bloopDmxOn_) {
-        dmx_.apply(bloopDmxChannel_, &bloopSavedLevel_, 1, false);
-      }
-      bloopDmxChannel_ = pendingBloopDmx_;
-      bloopSavedLevel_ = dmx_.levelAt(bloopDmxChannel_);
-      const uint8_t full = 255;
-      dmx_.apply(bloopDmxChannel_, &full, 1, false);
-      bloopDmxUntilMs_ = millis() + pendingBloopMs_;
-      bloopDmxOn_ = true;
-    }
+  applyFrameTrigger(pendingStart_);
+  if (syncDmx_) {
+    applyProgramDmx(pendingStart_);
   }
+  bloop_.fire(gio_, dmx_);
+  if (bloop_.running() && mcClient_.ready()) {
+    mcClient_.beep(bloop_.holdMs());
+  }
+  shutter_.beginMove(gio_);
   mcClient_.pathGoRange(pendingStart_, pendingEnd_);
 }
 
-uint32_t DmcBridge::psFromFpsX1000(uint32_t fpsX1000) const {
-  if (fpsX1000 < 1) {
-    fpsX1000 = 24000;
-  }
-  uint32_t us = (1000000000UL + (fpsX1000 / 2)) / fpsX1000;
-  if (us < 1000) {
-    us = 1000;
-  }
-  return us;
-}
+uint32_t DmcBridge::psFromFpsX1000(uint32_t fpsX1000) const { return framePeriodUs(fpsX1000); }
 
 void DmcBridge::handleDmcFrame(const DmcFrame& frame) {
   if (!frame.valid) {
@@ -564,38 +654,17 @@ void DmcBridge::handleDmcFrame(const DmcFrame& frame) {
       break;
     }
     case kDmcMsgDmx: {
-      uint8_t ramp = 0;
-      uint16_t channel = 1;
-      uint16_t count = 0;
-      const uint8_t* levels = nullptr;
-      bool parsed = false;
-      if (frame.payload.size() >= 7) {
-        uint32_t channel32 = 0;
-        uint16_t counted = 0;
-        uint8_t rampByte = 0;
-        if (readDwordLE(frame.payload, 0, &channel32) && readWordLE(frame.payload, 4, &counted) &&
-            readByte(frame.payload, 6, &rampByte) && counted > 0 && 7u + counted == frame.payload.size() &&
-            channel32 >= 1 && channel32 <= static_cast<uint32_t>(kDmxChannels)) {
-          channel = static_cast<uint16_t>(channel32);
-          count = counted;
-          ramp = rampByte;
-          levels = frame.payload.data() + 7;
-          parsed = true;
-        }
+      LiveDmx live;
+      const LiveDmxStatus st = parseLiveDmx(frame.payload, &live);
+      if (st == LiveDmxStatus::kGeneral) {
+        sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+        break;
       }
-      if (!parsed) {
-        if (frame.payload.size() < 4 || !readByte(frame.payload, 0, &ramp) || !readWordLE(frame.payload, 1, &channel)) {
-          sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
-          break;
-        }
-        count = static_cast<uint16_t>(frame.payload.size() - 3);
-        levels = frame.payload.data() + 3;
-      }
-      if (channel < 1 || channel > kDmxChannels || count == 0) {
+      if (st == LiveDmxStatus::kRange) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
         break;
       }
-      dmx_.apply(channel, levels, count, ramp != 0);
+      dmx_.apply(live.channel, live.levels, live.count, live.ramp);
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
     }
@@ -606,7 +675,14 @@ void DmcBridge::handleDmcFrame(const DmcFrame& frame) {
       if (mcClient_.ready()) {
         mcClient_.requestPosition();
       }
-      sendMotorPositions(frame.id);
+      if (mcClient_.pathActive()) {
+        sendMotorPositions(frame.id, static_cast<int32_t>(moveTimeThousandths(mcClient_.currentFrame())));
+      } else if (postrollWaiting_) {
+        sendMotorPositions(frame.id,
+                           static_cast<int32_t>(moveTimeThousandths(static_cast<int32_t>(lround(postrollFrame_)))));
+      } else {
+        sendMotorPositions(frame.id);
+      }
       break;
     default:
       handleMotorOrRt(frame);
@@ -639,6 +715,9 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
         sendDmcAck(frame.id, frame.type, static_cast<uint32_t>(fault));
         break;
       }
+      if (shootNeedsEnd_ || wasPathActive_ || postrollWaiting_ || pendingPlay_ || armedPlay_ || mcClient_.pathActive()) {
+        cancelLive(true);
+      }
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       if (position == mcClient_.positionSteps(motor - 1) && !mcClient_.moving()) {
         sendMotorPositions(frame.id);
@@ -658,17 +737,31 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrRange);
         break;
       }
-      mcClient_.stopAxis(motor - 1);
+      if (shootNeedsEnd_ || wasPathActive_ || postrollWaiting_ || pendingPlay_ || armedPlay_ || mcClient_.pathActive()) {
+        cancelLive(true);
+      } else {
+        mcClient_.stopAxis(motor - 1);
+      }
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       sendMotorPositions(frame.id);
       break;
     }
     case kDmcMsgMotorStopAll:
-    case kDmcMsgMotorHardStop:
-      mcClient_.stopMotion();
+    case kDmcMsgMotorHardStop: {
+      const uint32_t now = millis();
+      const bool hard = frame.type == kDmcMsgMotorHardStop ||
+                        (lastStopAllMs_ != 0 && static_cast<uint32_t>(now - lastStopAllMs_) < kDmcStopAllHardMs);
+      if (frame.type == kDmcMsgMotorStopAll) {
+        lastStopAllMs_ = now;
+      }
+      cancelLive(true);
+      if (hard) {
+        mcClient_.stopMotion();
+      }
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       sendMotorPositions(frame.id);
       break;
+    }
     case kDmcMsgMotorResetPosition: {
       uint8_t motor = 0;
       int32_t position = 0;
@@ -707,6 +800,9 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       if (fault != 0) {
         sendDmcAck(frame.id, frame.type, static_cast<uint32_t>(fault));
         break;
+      }
+      if (shootNeedsEnd_ || wasPathActive_ || postrollWaiting_ || pendingPlay_ || armedPlay_ || mcClient_.pathActive()) {
+        cancelLive(true);
       }
       mcClient_.jogAxisToSteps(motor - 1, destination, speed);
       lastPositionTxMs_ = millis();
@@ -859,65 +955,52 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
         break;
       }
+      if (shootNeedsEnd_ || wasPathActive_ || postrollWaiting_ || pendingPlay_ || armedPlay_ || mcClient_.pathActive()) {
+        cancelLive(true);
+      }
       mcClient_.moveToFramePose(frameNo);
       applyProgramDmx(frameNo);
-      armedPlay_ = false;
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       lastPositionTxMs_ = millis();
-      sendMotorPositions(frame.id, frameNo);
+      sendMotorPositions(frame.id, static_cast<int32_t>(moveTimeThousandths(frameNo)));
       break;
     }
     case kDmcMsgRtRunMove: {
-      uint32_t fpsX1000 = 24000;
-      int32_t startFrame = 1;
-      int32_t endFrame = 1;
-      uint32_t prerollMs = 0;
-      uint32_t postrollMs = 0;
-      uint8_t syncDmx = 0;
-      uint32_t bloopLoc = 0;
-      uint16_t bloopDmx = 0;
-      uint16_t bloopTime = 0;
-      if (frame.payload.size() < 20 || !readDwordLE(frame.payload, 0, &fpsX1000) ||
-          !readSignedDwordLE(frame.payload, 4, &startFrame) || !readSignedDwordLE(frame.payload, 8, &endFrame)) {
+      RtRunMove move;
+      if (!parseRtRunMove(frame.payload, &move)) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
         break;
-      }
-      if (frame.payload.size() >= 24) {
-        readDwordLE(frame.payload, 12, &prerollMs);
-      }
-      if (frame.payload.size() >= 28) {
-        readDwordLE(frame.payload, 16, &postrollMs);
-      }
-      if (frame.payload.size() >= 29) {
-        readByte(frame.payload, 20, &syncDmx);
-      }
-      (void)prerollMs;
-      syncDmx_ = syncDmx != 0;
-      if (frame.payload.size() >= 33) {
-        readDwordLE(frame.payload, 21, &bloopLoc);
-      }
-      if (frame.payload.size() >= 35) {
-        readWordLE(frame.payload, 25, &bloopDmx);
-      }
-      if (frame.payload.size() >= 37) {
-        readWordLE(frame.payload, 27, &bloopTime);
       }
       if (path_.empty()) {
         sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
         break;
       }
-      mcClient_.setPathSliceUs(psFromFpsX1000(fpsX1000));
-      mcClient_.moveToFramePose(startFrame);
-      if (syncDmx_) {
-        applyProgramDmx(startFrame);
+      RtPlaySpan span;
+      rtPlaySpan(move, &span);
+      if (rejectRunLimits(move, span, frame.id)) {
+        break;
       }
-      pendingStart_ = startFrame;
-      pendingEnd_ = endFrame;
-      pendingBloopMs_ = (bloopLoc != 0 || bloopTime != 0) ? (bloopTime == 0 ? 100 : bloopTime) : 0;
-      pendingBloopDmx_ = bloopDmx;
-      pendingPostrollMs_ = postrollMs;
+      wasPathActive_ = false;
       postrollWaiting_ = false;
+      postrollMoveSent_ = false;
       pendingPlay_ = false;
+      endShoot(true);
+      mcClient_.setPathSliceUs(psFromFpsX1000(move.fpsX1000));
+      moveToSample(span.prerollFrame);
+      syncDmx_ = move.syncDmx;
+      if (syncDmx_) {
+        applyProgramDmx(move.startFrame);
+      }
+      runStart_ = move.startFrame;
+      runEnd_ = move.endFrame;
+      pendingStart_ = move.startFrame;
+      pendingEnd_ = move.endFrame;
+      postrollFrame_ = span.postrollFrame;
+      pendingPostrollMs_ = move.postrollMs;
+      bloop_.release(gio_, dmx_);
+      shutter_.endMove(gio_);
+      bloop_.arm(move.bloopLocation, move.bloopDmx, move.bloopTimeMs);
+      shutter_.arm(move.flags, move.cameraOpen, move.cameraClose, framePeriodUs(move.fpsX1000));
       armedPlay_ = true;
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
       break;
@@ -941,6 +1024,7 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
           if (!mcClient_.moveForMs(shootMoveMs_, shootRampMs_, shootEndSteps_, shootBlur_,
                                    mcClient_.advertisedMotors())) {
             sendDmcAck(frame.id, frame.type, kDmcAckErrGeneral);
+            endShoot(true);
             break;
           }
           shootGoing_ = true;
@@ -969,8 +1053,12 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       }
       pendingStart_ = path_.startFrame();
       pendingEnd_ = path_.endFrame();
-      pendingBloopMs_ = 0;
-      pendingPrerollMs_ = 0;
+      runStart_ = pendingStart_;
+      runEnd_ = pendingEnd_;
+      postrollFrame_ = pendingEnd_;
+      pendingPostrollMs_ = 0;
+      bloop_.release(gio_, dmx_);
+      shutter_.endMove(gio_);
       pendingPlayAtMs_ = millis();
       pendingPlay_ = true;
       sendDmcAck(frame.id, frame.type, kDmcAckOk);
@@ -994,7 +1082,12 @@ void DmcBridge::handleMotorOrRt(const DmcFrame& frame) {
       mcClient_.setPathSliceUs(psFromFpsX1000(fpsX1000));
       pendingStart_ = from;
       pendingEnd_ = dest;
-      pendingBloopMs_ = 0;
+      runStart_ = from;
+      runEnd_ = dest;
+      postrollFrame_ = dest;
+      pendingPostrollMs_ = 0;
+      bloop_.release(gio_, dmx_);
+      shutter_.endMove(gio_);
       pendingPlayAtMs_ = millis();
       pendingPlay_ = true;
       sendDmcAck(frame.id, frame.type, kDmcAckOk);

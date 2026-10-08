@@ -10,6 +10,7 @@
 #include <dmc_protocol.h>
 #include <dmx_engine.h>
 #include <gio_io.h>
+#include <rt_support.h>
 
 namespace sliderdmc {
 
@@ -32,11 +33,17 @@ class DmcBridge {
   void maybeSendPositionReport();
   void maybeUnsolicitedGio();
   void maybeFinishPath();
-  void maybeRestoreBloop();
   void maybeFinishShoot();
+  void endShoot(bool notify);
+  void cancelLive(bool notify);
+  void noteCdc(bool up);
+  void sendHardStop(uint8_t reason);
+  bool moveToSample(double frameTime);
+  uint32_t poseFault(double frameTime, bool extrapolate) const;
+  bool rejectRunLimits(const RtRunMove& move, const RtPlaySpan& span, uint32_t id);
+  bool inRun(int frame) const;
   void handleShootFrame(const DmcFrame& frame);
   void handleShootFrame2(const DmcFrame& frame);
-  void fireBloop(unsigned ms);
   void applyFrameTrigger(int dfFrame);
   void applyProgramDmx(int dfFrame);
   void pumpPendingPlay();
@@ -60,16 +67,18 @@ class DmcBridge {
   bool wasPathActive_ = false;
   int pendingStart_ = 1;
   int pendingEnd_ = 1;
-  unsigned pendingBloopMs_ = 0;
-  uint16_t pendingBloopDmx_ = 0;
-  uint16_t bloopDmxChannel_ = 0;
-  uint8_t bloopSavedLevel_ = 0;
-  uint32_t bloopDmxUntilMs_ = 0;
-  bool bloopDmxOn_ = false;
+  int runStart_ = 1;
+  int runEnd_ = 1;
+  double postrollFrame_ = 1;
+  BloopOut bloop_;
+  LiveShutter shutter_;
+  uint32_t lastStopAllMs_ = 0;
+  bool cdcWasUp_ = false;
+  bool shootNeedsEnd_ = false;
   uint32_t pendingPostrollMs_ = 0;
   uint32_t postrollUntilMs_ = 0;
   bool postrollWaiting_ = false;
-  uint32_t pendingPrerollMs_ = 0;
+  bool postrollMoveSent_ = false;
   bool shootArmed_ = false;
   bool shootGoing_ = false;
   bool shootPendingMf_ = false;
